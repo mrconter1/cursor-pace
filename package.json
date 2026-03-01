@@ -2,7 +2,7 @@
   "name": "cursor-pace",
   "displayName": "Cursor Pace",
   "description": "Track and pace your Cursor AI spending with daily budget limits",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "mrconter1",
   "repository": {
     "type": "git",
@@ -98,12 +98,9 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/sql.js": "^1.4.9",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.7.1",
     "typescript": "^5.3.0"
   },
-  "dependencies": {
-    "sql.js": "^1.14.0"
-  }
+  "dependencies": {}
 }

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import initSqlJs from "sql.js";
+import { readSqliteValue } from "./sqlite-reader";
 
 function getCursorDbPath(): string {
   const platform = process.platform;
@@ -33,30 +33,21 @@ function buildSessionToken(jwt: string): string | null {
   return `${userId}%3A%3A${jwt}`;
 }
 
-export async function getSessionToken(extensionPath: string): Promise<string> {
+export async function getSessionToken(_extensionPath: string): Promise<string> {
   const dbPath = getCursorDbPath();
   if (!fs.existsSync(dbPath)) {
     throw new Error(`Cursor database not found at: ${dbPath}`);
   }
 
-  const wasmPath = path.join(extensionPath, "node_modules", "sql.js", "dist", "sql-wasm.wasm");
-  const SQL = await initSqlJs({
-    locateFile: () => wasmPath,
-  });
-
-  const dbBuffer = fs.readFileSync(dbPath);
-  const db = new SQL.Database(dbBuffer);
-
-  try {
-    const result = db.exec("SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken' LIMIT 1");
-    if (!result.length || !result[0].values.length) {
-      throw new Error("cursorAuth/accessToken not found in Cursor database.");
-    }
-    const jwt = result[0].values[0][0] as string;
-    const token = buildSessionToken(jwt);
-    if (!token) throw new Error("Failed to build session token from JWT.");
-    return token;
-  } finally {
-    db.close();
+  const jwt = readSqliteValue(dbPath, "ItemTable", "cursorAuth/accessToken");
+  if (!jwt) {
+    throw new Error("cursorAuth/accessToken not found in Cursor database.");
   }
+
+  const token = buildSessionToken(jwt);
+  if (!token) {
+    throw new Error("Failed to build session token from JWT.");
+  }
+
+  return token;
 }
