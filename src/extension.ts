@@ -118,7 +118,9 @@ function updateWebview(context: vscode.ExtensionContext) {
 
   const cfg = vscode.workspace.getConfiguration("cursorPace");
   const meta = (calibration as Record<string, unknown>)["_meta"] as { activeDays?: number; historyDays?: number } | undefined;
-  const todaySpend = (meta as Record<string, unknown> | undefined)?.todaySpend as number ?? 0;
+  const metaAny = meta as Record<string, unknown> | undefined;
+  const todaySpend = metaAny?.todaySpend as number ?? 0;
+  const monthSpend = metaAny?.monthSpend as number ?? 0;
   const settings = {
     subscription: cfg.get<string>("subscription", "ultra"),
     monthlyBudget: cfg.get<number>("monthlyBudget", 200),
@@ -126,30 +128,44 @@ function updateWebview(context: vscode.ExtensionContext) {
     historyDays: cfg.get<number>("historyDays", 90),
     activeDays: meta?.activeDays ?? null,
     todaySpend,
+    monthSpend,
   };
 
-  const { dailyBudget: dbForWebview } = getDailyBudget(context);
-  dashboardPanel.webview.html = getWebviewHtml(calibration, settings, lastSyncedAt, dbForWebview);
+  const { dailyBudget, flatDailyBudget } = getDailyBudget(context);
+  dashboardPanel.webview.html = getWebviewHtml(calibration, settings, lastSyncedAt, dailyBudget, flatDailyBudget);
 }
 
-function getDailyBudget(context: vscode.ExtensionContext): { dailyBudget: number; activeDaysPerMonth: number } {
+function getDailyBudget(context: vscode.ExtensionContext): { dailyBudget: number; flatDailyBudget: number; activeDaysPerMonth: number } {
   const cfg = vscode.workspace.getConfiguration("cursorPace");
   const monthlyBudget = cfg.get<number>("monthlyBudget", 200);
   const historyDays = cfg.get<number>("historyDays", 90);
 
   const calibrationPath = getCalibrationPath(context);
   let activeDays: number | null = null;
+  let monthSpend = 0;
+  let todaySpend = 0;
+  let monthActiveDaysSoFar = 0;
   if (fs.existsSync(calibrationPath)) {
     try {
       const data = JSON.parse(fs.readFileSync(calibrationPath, "utf8"));
       activeDays = data._meta?.activeDays ?? null;
+      monthSpend = data._meta?.monthSpend ?? 0;
+      todaySpend = data._meta?.todaySpend ?? 0;
+      monthActiveDaysSoFar = data._meta?.monthActiveDaysSoFar ?? 0;
     } catch { /* ignore */ }
   }
 
   const activeDaysPerMonth = activeDays !== null
     ? Math.round(activeDays / historyDays * 30)
     : 22;
-  return { dailyBudget: monthlyBudget / activeDaysPerMonth, activeDaysPerMonth };
+  const flatDailyBudget = monthlyBudget / activeDaysPerMonth;
+
+  const spentBeforeToday = monthSpend - todaySpend;
+  const remainingBudget = monthlyBudget - spentBeforeToday;
+  const remainingActiveDays = Math.max(1, activeDaysPerMonth - monthActiveDaysSoFar);
+  const dailyBudget = Math.max(0, remainingBudget / remainingActiveDays);
+
+  return { dailyBudget, flatDailyBudget, activeDaysPerMonth };
 }
 
 function updateStatusBar(todaySpend: number, dailyBudget: number) {
@@ -252,14 +268,18 @@ function getWebviewHtml(
     historyDays: number;
     activeDays: number | null;
     todaySpend: number;
+    monthSpend: number;
   },
   lastSyncedAt: Date | null,
-  dailyBudget: number
+  dailyBudget: number,
+  flatDailyBudget: number
 ): string {
   const activeDaysPerMonth = settings.activeDays !== null
     ? Math.round(settings.activeDays / settings.historyDays * 30)
     : 22;
   const dailyPct = dailyBudget > 0 ? Math.round((settings.todaySpend / dailyBudget) * 100) : 0;
+  const monthPct = settings.monthlyBudget > 0 ? Math.round((settings.monthSpend / settings.monthlyBudget) * 100) : 0;
+  const budgetAdjusted = Math.abs(dailyBudget - flatDailyBudget) > 0.01;
 
   type ModelStats = {
     requests: number;
@@ -406,10 +426,18 @@ function getWebviewHtml(
       <div class="card-value" style="${dailyPct >= 100 ? 'color:var(--vscode-errorForeground)' : dailyPct >= 80 ? 'color:var(--vscode-editorWarning-foreground)' : ''}">${dailyPct}<span class="card-unit">%</span></div>
     </div>
     <div class="card">
-      <div class="card-label">Monthly Budget
+      <div class="card-label">Daily Budget
+        <span class="info-badge">i<span class="tooltip">${budgetAdjusted
+          ? `Adjusted from $${flatDailyBudget.toFixed(2)} based on month-to-date spend. Over/underspending earlier in the month shifts your remaining daily budget.`
+          : `$${settings.monthlyBudget} ÷ ${activeDaysPerMonth} active days`}</span></span>
+      </div>
+      <div class="card-value"${budgetAdjusted ? ` style="color:${dailyBudget < flatDailyBudget ? 'var(--vscode-editorWarning-foreground)' : 'var(--vscode-testing-iconPassed)'}"` : ''}>$${dailyBudget.toFixed(2)} <span class="card-unit">/ day</span></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Month Spend
         <span class="info-badge">i<span class="tooltip">${PLANS[settings.subscription]?.note ?? "Custom budget"}</span></span>
       </div>
-      <div class="card-value">$${settings.monthlyBudget} <span class="card-unit">/ mo</span></div>
+      <div class="card-value" style="${monthPct >= 100 ? 'color:var(--vscode-errorForeground)' : ''}">$${settings.monthSpend.toFixed(2)} <span class="card-unit">/ $${settings.monthlyBudget}</span></div>
     </div>
     <div class="card">
       <div class="card-label">Active Days
