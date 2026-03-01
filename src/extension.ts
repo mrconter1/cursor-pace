@@ -273,6 +273,16 @@ function getWebviewHtml(
   button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
   button.secondary:hover { background: var(--table-header); }
   .empty { color: var(--muted); padding: 20px 0; }
+  .subtitle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; }
+  .subtitle-text { color: var(--muted); font-size: 12px; }
+  .refresh-btn { display: inline-flex; align-items: center; background: transparent; color: var(--muted); border: none; padding: 0; font-size: 15px; cursor: pointer; line-height: 1; transition: color 0.15s; }
+  .refresh-btn:hover { color: var(--fg); background: transparent; }
+  .refresh-btn.spinning { animation: spin 1s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .table-wrap { position: relative; }
+  .table-overlay { display: none; position: absolute; inset: 0; background: var(--bg); opacity: 0.6; z-index: 5; }
+  .table-overlay.visible { display: block; }
+  .loading-row td { color: var(--muted); text-align: center; padding: 20px; font-style: italic; }
   .info-badge { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font-size: 10px; font-weight: 700; cursor: default; position: relative; margin-left: 5px; vertical-align: middle; line-height: 1; }
   .info-badge:hover .tooltip { display: block; }
   .tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--vscode-editorHoverWidget-background, #252526); border: 1px solid var(--vscode-editorHoverWidget-border, #454545); color: var(--vscode-editorHoverWidget-foreground, #ccc); font-size: 11px; font-weight: 400; padding: 6px 10px; border-radius: 4px; white-space: normal; width: max-content; max-width: 220px; line-height: 1.5; z-index: 10; pointer-events: none; }
@@ -280,7 +290,12 @@ function getWebviewHtml(
 </head>
 <body>
 <h1>Cursor Pace</h1>
-<p class="subtitle">Track and pace your Cursor AI spending &nbsp;·&nbsp; Last synced: ${lastSyncedAt ? timeSince(lastSyncedAt) : "never"}</p>
+<div class="subtitle-row">
+  <span class="subtitle-text">Track and pace your Cursor AI spending</span>
+  <span class="subtitle-text">·</span>
+  <span class="subtitle-text" id="lastSynced">Last synced: ${lastSyncedAt ? timeSince(lastSyncedAt) : "never"}</span>
+  <button class="refresh-btn" id="refreshBtn" onclick="refresh()" title="Refresh usage data">↻</button>
+</div>
 
 <div class="section">
   <div class="section-title">Hourly Pace</div>
@@ -310,22 +325,25 @@ function getWebviewHtml(
 
 <div class="section">
   <div class="section-title">Model Cost Data <span style="font-weight:400;text-transform:none">(last ${settings.historyDays === 90 ? "3 months" : "30 days"})</span></div>
-  ${hasData ? `
-  <table>
-    <thead>
-      <tr>
-        <th>Model</th>
-        <th>Requests</th>
-        <th>Cost / 1M tokens</th>
-        <th>Est. 30-day cost</th>
-        <th>Pace at budget</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${modelRows}
-      ${noDataRows}
-    </tbody>
-  </table>` : `<p class="empty">No calibration data yet. Click Refresh to fetch usage data.</p>`}
+  <div class="table-wrap">
+    <div class="table-overlay" id="tableOverlay"></div>
+    ${hasData ? `
+    <table>
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Requests</th>
+          <th>Cost / 1M tokens</th>
+          <th>Est. cost</th>
+          <th>Pace at budget</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        ${modelRows}
+        ${noDataRows}
+      </tbody>
+    </table>` : `<p class="empty">No calibration data yet. Click Refresh to fetch usage data.</p>`}
+  </div>
 </div>
 
 <div class="section">
@@ -367,7 +385,6 @@ function getWebviewHtml(
   </div>
   <div class="actions" style="margin-top:14px">
     <button onclick="saveSettings()">Save Settings</button>
-    <button class="secondary" onclick="refresh()">↺ Refresh Data</button>
   </div>
 </div>
 
@@ -397,6 +414,14 @@ function getWebviewHtml(
     });
   }
   function refresh() {
+    const btn = document.getElementById('refreshBtn');
+    const overlay = document.getElementById('tableOverlay');
+    const synced = document.getElementById('lastSynced');
+    btn.classList.add('spinning');
+    btn.disabled = true;
+    btn.style.pointerEvents = 'none';
+    if (overlay) overlay.classList.add('visible');
+    if (synced) synced.textContent = 'Syncing...';
     vscode.postMessage({ type: 'refresh' });
   }
 </script>
