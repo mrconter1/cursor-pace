@@ -1,36 +1,41 @@
 # Cursor Pace
 
-VS Code/Cursor extension that tracks your Cursor AI spending and paces usage against an hourly budget. Fetches real usage data from Cursor's dashboard API and tells you how many requests per hour you can afford.
+A Cursor extension that tracks your AI spending and keeps you on budget, day by day.
 
-## Features
+Cursor subscriptions come with a pool of model credits each month, but there's no built-in way to pace yourself. Cursor Pace fetches your real usage data, computes per-model cost rates, and gives you a daily budget that adjusts dynamically. If you overspend early in the month, the remaining days get tighter. If you're frugal, they loosen up.
 
-- Reads auth automatically from Cursor's local database — no login needed
-- Fetches usage history (30 or 90 days) from Cursor's API
-- Computes per-model cost rates from on-demand rows, extrapolates across included plan tokens
-- Shows an hourly pace per model: how many requests/hr you can make and stay on budget
-- Dashboard accessible via command palette (`Cursor Pace: Open Dashboard`)
+When you hit your daily limit, the extension nags you every 5 minutes to switch to `auto` (which is free) for the rest of the day.
 
-## Setup
+## How it works
 
-```bash
-npm install
-npm run compile
+The extension reads your session token from Cursor's local database (no login required), fetches your usage history CSV from Cursor's dashboard API, and derives cost-per-token rates from on-demand rows. These rates are then applied to included-plan usage to estimate your real spend. For models with no price data, it assumes worst-case pricing so your budget is never understated.
+
+Every 5 minutes, the extension refreshes and updates the status bar with your current daily usage percentage. The status bar turns yellow at your warn threshold and red when you're over your daily budget.
+
+## Install
+
+Download the latest `.vsix` from [Releases](../../releases), then:
+
+```
+cursor --install-extension cursor-pace-0.1.0.vsix
 ```
 
-## Running in Development
+Or install from the command palette: `Extensions: Install from VSIX...`
 
-```bash
+## Development
+
+```
+npm install
 npm run compile && cursor --extensionDevelopmentPath=C:\path\to\cursor-pace
 ```
 
 ## Configuration
 
-All settings are available in VS Code settings under `Cursor Pace`:
+Settings are available under `Cursor Pace` in the settings UI, or in the extension's dashboard (`Cursor Pace: Open Dashboard` from the command palette).
 
 | Setting | Default | Description |
 |---|---|---|
-| `cursorPace.subscription` | `ultra` | Your Cursor plan (hobby/pro/pro_plus/ultra/teams/custom) |
-| `cursorPace.monthlyBudget` | `200` | Monthly budget in USD |
-| `cursorPace.workingHoursPerDay` | `8` | Working hours/day for hourly pace calculation |
-| `cursorPace.warnThreshold` | `80` | Warn at this % of hourly budget (not yet active) |
-| `cursorPace.historyDays` | `90` | How far back to fetch usage data (30 or 90) |
+| `cursorPace.subscription` | `ultra` | Your Cursor plan, sets the effective monthly budget automatically |
+| `cursorPace.monthlyBudget` | `200` | Monthly budget in USD (editable when plan is set to `custom`) |
+| `cursorPace.warnThreshold` | `80` | Warn when daily spend reaches this % of daily budget |
+| `cursorPace.historyDays` | `90` | How far back to fetch usage data for cost calibration (30 or 90 days) |
