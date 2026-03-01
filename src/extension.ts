@@ -69,7 +69,6 @@ function openDashboard(context: vscode.ExtensionContext) {
       const cfg = vscode.workspace.getConfiguration("cursorPace");
       cfg.update("subscription", msg.subscription, true);
       cfg.update("monthlyBudget", msg.monthlyBudget, true);
-      cfg.update("workingHoursPerDay", msg.workingHoursPerDay, true);
       cfg.update("warnThreshold", msg.warnThreshold, true);
       cfg.update("historyDays", msg.historyDays, true);
       vscode.window.showInformationMessage("Cursor Pace settings saved.");
@@ -98,16 +97,55 @@ function updateWebview(context: vscode.ExtensionContext) {
 
   const cfg = vscode.workspace.getConfiguration("cursorPace");
   const meta = (calibration as Record<string, unknown>)["_meta"] as { activeDays?: number; historyDays?: number } | undefined;
+  const todaySpend = (meta as Record<string, unknown> | undefined)?.todaySpend as number ?? 0;
   const settings = {
     subscription: cfg.get<string>("subscription", "ultra"),
     monthlyBudget: cfg.get<number>("monthlyBudget", 200),
-    workingHoursPerDay: cfg.get<number>("workingHoursPerDay", 8),
     warnThreshold: cfg.get<number>("warnThreshold", 80),
     historyDays: cfg.get<number>("historyDays", 90),
     activeDays: meta?.activeDays ?? null,
+    todaySpend,
   };
 
-  dashboardPanel.webview.html = getWebviewHtml(calibration, settings, lastSyncedAt);
+  const { dailyBudget: dbForWebview } = getDailyBudget(context);
+  dashboardPanel.webview.html = getWebviewHtml(calibration, settings, lastSyncedAt, dbForWebview);
+}
+
+function getDailyBudget(context: vscode.ExtensionContext): { dailyBudget: number; activeDaysPerMonth: number } {
+  const cfg = vscode.workspace.getConfiguration("cursorPace");
+  const monthlyBudget = cfg.get<number>("monthlyBudget", 200);
+  const historyDays = cfg.get<number>("historyDays", 90);
+
+  const calibrationPath = getCalibrationPath(context);
+  let activeDays: number | null = null;
+  if (fs.existsSync(calibrationPath)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(calibrationPath, "utf8"));
+      activeDays = data._meta?.activeDays ?? null;
+    } catch { /* ignore */ }
+  }
+
+  const activeDaysPerMonth = activeDays !== null
+    ? Math.round(activeDays / historyDays * 30)
+    : 22;
+  return { dailyBudget: monthlyBudget / activeDaysPerMonth, activeDaysPerMonth };
+}
+
+function updateStatusBar(todaySpend: number, dailyBudget: number) {
+  const pct = dailyBudget > 0 ? Math.round((todaySpend / dailyBudget) * 100) : 0;
+
+  if (pct >= 100) {
+    statusBarItem.text = `$(warning) ${pct}% of daily limit`;
+    statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+  } else if (pct >= 80) {
+    statusBarItem.text = `$(pulse) ${pct}% of daily limit`;
+    statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
+  } else {
+    statusBarItem.text = `$(pulse) ${pct}% of daily limit`;
+    statusBarItem.backgroundColor = undefined;
+  }
+
+  statusBarItem.tooltip = `Today: $${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}`;
 }
 
 async function runRefresh(context: vscode.ExtensionContext) {
@@ -117,6 +155,7 @@ async function runRefresh(context: vscode.ExtensionContext) {
     const cfg = vscode.workspace.getConfiguration("cursorPace");
     const historyDays = cfg.get<number>("historyDays", 90);
     const subscription = cfg.get<string>("subscription", "ultra");
+    const warnThreshold = cfg.get<number>("warnThreshold", 80);
     const planBudget = PLANS[subscription]?.effectiveBudget;
     if (planBudget !== null && planBudget !== undefined) {
       cfg.update("monthlyBudget", planBudget, true);
@@ -124,11 +163,26 @@ async function runRefresh(context: vscode.ExtensionContext) {
     const calibration = await fetchCalibration(token, historyDays);
     const calibrationPath = getCalibrationPath(context);
     fs.writeFileSync(calibrationPath, JSON.stringify(calibration, null, 2));
-    statusBarItem.text = "$(pulse) Cursor Pace";
-    vscode.window.showInformationMessage("Cursor Pace: Data refreshed.");
+
+    const todaySpend = (calibration._meta as { todaySpend?: number }).todaySpend ?? 0;
+    const { dailyBudget } = getDailyBudget(context);
+    updateStatusBar(todaySpend, dailyBudget);
+
+    const pct = dailyBudget > 0 ? Math.round((todaySpend / dailyBudget) * 100) : 0;
+    if (pct >= 100) {
+      vscode.window.showErrorMessage(
+        `Cursor Pace: You've used ${pct}% of your daily budget ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Switch to auto to avoid extra costs!`
+      );
+    } else if (pct >= warnThreshold) {
+      vscode.window.showWarningMessage(
+        `Cursor Pace: ${pct}% of daily budget used ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}).`
+      );
+    }
+
     updateWebview(context);
   } catch (err: unknown) {
     statusBarItem.text = "$(error) Cursor Pace";
+    statusBarItem.backgroundColor = undefined;
     const msg = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`Cursor Pace refresh failed: ${msg}`);
   }
@@ -165,18 +219,18 @@ function getWebviewHtml(
   settings: {
     subscription: string;
     monthlyBudget: number;
-    workingHoursPerDay: number;
     warnThreshold: number;
     historyDays: number;
     activeDays: number | null;
+    todaySpend: number;
   },
-  lastSyncedAt: Date | null
+  lastSyncedAt: Date | null,
+  dailyBudget: number
 ): string {
-  // Scale active days from history window to a 30-day month equivalent
   const activeDaysPerMonth = settings.activeDays !== null
     ? Math.round(settings.activeDays / settings.historyDays * 30)
     : 22;
-  const hourlyBudget = settings.monthlyBudget / (activeDaysPerMonth * settings.workingHoursPerDay);
+  const dailyPct = dailyBudget > 0 ? Math.round((settings.todaySpend / dailyBudget) * 100) : 0;
 
   type ModelStats = {
     requests: number;
@@ -205,14 +259,15 @@ function getWebviewHtml(
       const cpt = s.cost_per_token!;
       const cptPer1M = (cpt * 1_000_000).toFixed(4);
       const estCost = s.total_estimated_cost?.toFixed(2) ?? "—";
-      const reqsPerHour = Math.floor(hourlyBudget / (cpt * (s.total_tokens / s.requests)));
+      const avgTokensPerReq = s.total_tokens / s.requests;
+      const reqsPerDay = Math.floor(dailyBudget / (cpt * avgTokensPerReq));
       return `
       <tr>
         <td class="model-name">${name}</td>
         <td>${s.requests.toLocaleString()}</td>
         <td>$${cptPer1M}</td>
         <td>$${estCost}</td>
-        <td>${reqsPerHour > 0 ? `~${reqsPerHour}/hr` : "<1/hr"}</td>
+        <td>${reqsPerDay > 0 ? `~${reqsPerDay}/day` : "<1/day"}</td>
       </tr>`;
     })
     .join("");
@@ -311,8 +366,16 @@ function getWebviewHtml(
 </div>
 
 <div class="section">
-  <div class="section-title">Hourly Pace</div>
+  <div class="section-title">Daily Pace</div>
   <div class="pace-card">
+    <div class="card">
+      <div class="card-label">Today's Spend</div>
+      <div class="card-value" style="${dailyPct >= 100 ? 'color:var(--vscode-errorForeground)' : dailyPct >= 80 ? 'color:var(--vscode-editorWarning-foreground)' : ''}">$${settings.todaySpend.toFixed(2)} <span class="card-unit">/ $${dailyBudget.toFixed(2)}</span></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Daily Usage</div>
+      <div class="card-value" style="${dailyPct >= 100 ? 'color:var(--vscode-errorForeground)' : dailyPct >= 80 ? 'color:var(--vscode-editorWarning-foreground)' : ''}">${dailyPct}<span class="card-unit">%</span></div>
+    </div>
     <div class="card">
       <div class="card-label">Monthly Budget
         <span class="info-badge">i<span class="tooltip">${PLANS[settings.subscription]?.note ?? "Custom budget"}</span></span>
@@ -324,10 +387,6 @@ function getWebviewHtml(
         <span class="info-badge">i<span class="tooltip">Days with requests ≥ (avg − 1 std dev) in your history.&#10;Excludes very low-usage days, keeps crunch days.</span></span>
       </div>
       <div class="card-value">${activeDaysPerMonth} <span class="card-unit">/ mo</span></div>
-    </div>
-    <div class="card">
-      <div class="card-label">Hourly Budget</div>
-      <div class="card-value">$${hourlyBudget.toFixed(2)} <span class="card-unit">/ hr</span></div>
     </div>
     <div class="card">
       <div class="card-label">Warn At</div>
@@ -348,7 +407,7 @@ function getWebviewHtml(
           <th>Requests</th>
           <th>Cost / 1M tokens</th>
           <th>Est. cost</th>
-          <th>Pace at budget</th>
+          <th>Pace at daily budget</th>
         </tr>
       </thead>
       <tbody id="tableBody">
@@ -379,10 +438,6 @@ function getWebviewHtml(
         <span class="info-badge">i<span class="tooltip">${PLANS[settings.subscription]?.note ?? "Set your own budget"}</span></span>
       </label>
       <input type="number" id="monthlyBudget" value="${settings.monthlyBudget}" min="0" ${settings.subscription !== "custom" ? 'readonly style="opacity:0.6"' : ""} />
-    </div>
-    <div class="field">
-      <label>Working Hours / Day</label>
-      <input type="number" id="workingHoursPerDay" value="${settings.workingHoursPerDay}" min="1" max="24" />
     </div>
     <div class="field">
       <label>Warn Threshold (%)</label>
@@ -421,7 +476,6 @@ function getWebviewHtml(
       type: 'saveSettings',
       subscription: document.getElementById('subscription').value,
       monthlyBudget: +document.getElementById('monthlyBudget').value,
-      workingHoursPerDay: +document.getElementById('workingHoursPerDay').value,
       warnThreshold: +document.getElementById('warnThreshold').value,
       historyDays: +document.getElementById('historyDays').value,
     });

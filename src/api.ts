@@ -14,6 +14,7 @@ export interface CalibrationMeta {
   activeDays: number;
   historyDays: number;
   fetchedAt: string;
+  todaySpend: number;
 }
 
 export type Calibration = Record<string, ModelStats> & { _meta: CalibrationMeta };
@@ -105,6 +106,10 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
 
   const stats: Record<string, ModelStats> = {};
   const requestsPerDay = new Map<string, number>();
+  const todayKey = new Date().toISOString().slice(0, 10);
+
+  interface TodayRow { model: string; tokens: number; cost: number | null; }
+  const todayRows: TodayRow[] = [];
 
   for (const row of rows) {
     const model = row["Model"] ?? "";
@@ -117,7 +122,6 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
     const output = parseInt(row["Output Tokens"] ?? "0", 10) || 0;
     const costRaw = row["Cost"] ?? "";
 
-    // Track requests per day (YYYY-MM-DD)
     const dateKey = dateRaw.slice(0, 10);
     if (dateKey) requestsPerDay.set(dateKey, (requestsPerDay.get(dateKey) ?? 0) + 1);
 
@@ -136,6 +140,13 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
     } else {
       s.included_tokens += total;
     }
+
+    if (dateKey === todayKey && model.toLowerCase() !== "auto") {
+      const directCost = (kind === "On-Demand" && costRaw !== "Included" && costRaw !== "")
+        ? parseFloat(costRaw) || null
+        : null;
+      todayRows.push({ model, tokens: total, cost: directCost });
+    }
   }
 
   for (const s of Object.values(stats)) {
@@ -143,6 +154,15 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
       s.cost_per_token = s.on_demand_cost / s.on_demand_tokens;
       const estimatedIncluded = s.included_tokens * s.cost_per_token;
       s.total_estimated_cost = s.on_demand_cost + estimatedIncluded;
+    }
+  }
+
+  let todaySpend = 0;
+  for (const r of todayRows) {
+    if (r.cost !== null) {
+      todaySpend += r.cost;
+    } else if (stats[r.model]?.cost_per_token) {
+      todaySpend += r.tokens * stats[r.model].cost_per_token!;
     }
   }
 
@@ -154,6 +174,7 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
       activeDays,
       historyDays: days,
       fetchedAt: new Date().toISOString(),
+      todaySpend,
     },
   } as Calibration;
 }
