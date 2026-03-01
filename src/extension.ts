@@ -67,6 +67,7 @@ function openDashboard(context: vscode.ExtensionContext) {
       cfg.update("workingHoursPerDay", msg.workingHoursPerDay, true);
       cfg.update("workingDaysPerMonth", msg.workingDaysPerMonth, true);
       cfg.update("warnThreshold", msg.warnThreshold, true);
+      cfg.update("historyDays", msg.historyDays, true);
       vscode.window.showInformationMessage("Cursor Pace settings saved.");
       updateWebview(context);
     }
@@ -97,6 +98,7 @@ function updateWebview(context: vscode.ExtensionContext) {
     workingHoursPerDay: cfg.get<number>("workingHoursPerDay", 8),
     workingDaysPerMonth: cfg.get<number>("workingDaysPerMonth", 22),
     warnThreshold: cfg.get<number>("warnThreshold", 80),
+    historyDays: cfg.get<number>("historyDays", 30),
   };
 
   dashboardPanel.webview.html = getWebviewHtml(calibration, settings, lastSyncedAt);
@@ -106,7 +108,8 @@ async function runRefresh(context: vscode.ExtensionContext) {
   statusBarItem.text = "$(sync~spin) Refreshing...";
   try {
     const token = await getSessionToken(context.extensionPath);
-    const calibration = await fetchCalibration(token);
+    const historyDays = vscode.workspace.getConfiguration("cursorPace").get<number>("historyDays", 30);
+    const calibration = await fetchCalibration(token, historyDays);
     const calibrationPath = getCalibrationPath(context);
     fs.writeFileSync(calibrationPath, JSON.stringify(calibration, null, 2));
     statusBarItem.text = "$(pulse) Cursor Pace";
@@ -136,6 +139,7 @@ function getWebviewHtml(
     workingHoursPerDay: number;
     workingDaysPerMonth: number;
     warnThreshold: number;
+    historyDays: number;
   },
   lastSyncedAt: Date | null
 ): string {
@@ -231,6 +235,8 @@ function getWebviewHtml(
   .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
   .field input { width: 100%; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--input-border, var(--border)); border-radius: 3px; padding: 5px 8px; font-size: 13px; outline: none; }
   .field input:focus { border-color: var(--highlight); }
+  .field select { width: 100%; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--input-border, var(--border)); border-radius: 3px; padding: 5px 8px; font-size: 13px; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; cursor: pointer; }
+  .field select:focus { border-color: var(--highlight); }
   .actions { display: flex; gap: 8px; margin-top: 6px; }
   button { background: var(--btn-bg); color: var(--btn-fg); border: none; border-radius: 3px; padding: 6px 14px; font-size: 12px; cursor: pointer; }
   button:hover { background: var(--btn-hover); }
@@ -262,7 +268,7 @@ function getWebviewHtml(
 </div>
 
 <div class="section">
-  <div class="section-title">Model Cost Data <span style="font-weight:400;text-transform:none">(last 30 days)</span></div>
+  <div class="section-title">Model Cost Data <span style="font-weight:400;text-transform:none">(last ${settings.historyDays === 90 ? "3 months" : "30 days"})</span></div>
   ${hasData ? `
   <table>
     <thead>
@@ -300,6 +306,13 @@ function getWebviewHtml(
       <label>Warn Threshold (%)</label>
       <input type="number" id="warnThreshold" value="${settings.warnThreshold}" min="1" max="100" />
     </div>
+    <div class="field" style="grid-column: 1 / -1">
+      <label>Price History Window</label>
+      <select id="historyDays">
+        <option value="30" ${settings.historyDays === 30 ? "selected" : ""}>Last 30 days</option>
+        <option value="90" ${settings.historyDays === 90 ? "selected" : ""}>Last 3 months</option>
+      </select>
+    </div>
   </div>
   <div class="actions" style="margin-top:14px">
     <button onclick="saveSettings()">Save Settings</button>
@@ -316,6 +329,7 @@ function getWebviewHtml(
       workingHoursPerDay: +document.getElementById('workingHoursPerDay').value,
       workingDaysPerMonth: +document.getElementById('workingDaysPerMonth').value,
       warnThreshold: +document.getElementById('warnThreshold').value,
+      historyDays: +document.getElementById('historyDays').value,
     });
   }
   function refresh() {

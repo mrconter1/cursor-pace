@@ -46,6 +46,13 @@
           "type": "number",
           "default": 80,
           "description": "Warn when hourly spend reaches this % of hourly budget"
+        },
+        "cursorPace.historyDays": {
+          "type": "number",
+          "default": 30,
+          "enum": [30, 90],
+          "enumDescriptions": ["Last 30 days", "Last 3 months"],
+          "description": "How far back to fetch usage history for cost calibration"
         }
       }
     }
