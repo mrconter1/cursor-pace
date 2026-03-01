@@ -159,6 +159,11 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
     }
   }
 
+  const maxCpt = Math.max(
+    0,
+    ...Object.values(stats).map((s) => s.cost_per_token ?? 0)
+  );
+
   let todaySpend = 0;
   const untrackedSet = new Set<string>();
   const recentCutoff = nowMs - 15 * 60 * 1000;
@@ -167,8 +172,11 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
       todaySpend += r.cost;
     } else if (stats[r.model]?.cost_per_token) {
       todaySpend += r.tokens * stats[r.model].cost_per_token!;
-    } else if (r.timestamp >= recentCutoff) {
-      untrackedSet.add(r.model);
+    } else {
+      todaySpend += r.tokens * maxCpt;
+      if (r.timestamp >= recentCutoff) {
+        untrackedSet.add(r.model);
+      }
     }
   }
 
