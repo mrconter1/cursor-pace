@@ -34,6 +34,27 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand("cursorPace.refresh", () => {
       void runRefresh(context);
+    }),
+    vscode.commands.registerCommand("cursorPace.debugWarn", () => {
+      const { dailyBudget } = getDailyBudget(context);
+      const fakeSpend = dailyBudget * 0.85;
+      updateStatusBar(fakeSpend, dailyBudget);
+      vscode.window.showWarningMessage(
+        `Cursor Pace: 85% of daily budget used ($${fakeSpend.toFixed(2)} / $${dailyBudget.toFixed(2)}).`
+      );
+    }),
+    vscode.commands.registerCommand("cursorPace.debugOverBudget", () => {
+      const { dailyBudget } = getDailyBudget(context);
+      const fakeSpend = dailyBudget * 1.15;
+      updateStatusBar(fakeSpend, dailyBudget);
+      vscode.window.showErrorMessage(
+        `Cursor Pace: You've used 115% of your daily budget ($${fakeSpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Switch to auto to avoid extra costs!`
+      );
+    }),
+    vscode.commands.registerCommand("cursorPace.debugUntracked", () => {
+      vscode.window.showWarningMessage(
+        `Cursor Pace: No price data for fake-model-v3, mystery-llm-7b — spend from these models can't be tracked.`
+      );
     })
   );
 

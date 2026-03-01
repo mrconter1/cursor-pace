@@ -22,6 +22,18 @@
       {
         "command": "cursorPace.refresh",
         "title": "Cursor Pace: Refresh Usage Data"
+      },
+      {
+        "command": "cursorPace.debugWarn",
+        "title": "Cursor Pace [Debug]: Trigger Warn Threshold"
+      },
+      {
+        "command": "cursorPace.debugOverBudget",
+        "title": "Cursor Pace [Debug]: Trigger Over Budget"
+      },
+      {
+        "command": "cursorPace.debugUntracked",
+        "title": "Cursor Pace [Debug]: Trigger Untracked Model Warning"
       }
     ],
     "configuration": {
