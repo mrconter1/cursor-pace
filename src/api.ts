@@ -15,6 +15,7 @@ export interface CalibrationMeta {
   historyDays: number;
   fetchedAt: string;
   todaySpend: number;
+  untrackedModelsToday: string[];
 }
 
 export type Calibration = Record<string, ModelStats> & { _meta: CalibrationMeta };
@@ -108,7 +109,7 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
   const requestsPerDay = new Map<string, number>();
   const todayKey = new Date().toISOString().slice(0, 10);
 
-  interface TodayRow { model: string; tokens: number; cost: number | null; }
+  interface TodayRow { model: string; tokens: number; cost: number | null; timestamp: number; }
   const todayRows: TodayRow[] = [];
 
   for (const row of rows) {
@@ -145,7 +146,8 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
       const directCost = (kind === "On-Demand" && costRaw !== "Included" && costRaw !== "")
         ? parseFloat(costRaw) || null
         : null;
-      todayRows.push({ model, tokens: total, cost: directCost });
+      const timestamp = new Date(dateRaw).getTime() || 0;
+      todayRows.push({ model, tokens: total, cost: directCost, timestamp });
     }
   }
 
@@ -158,11 +160,15 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
   }
 
   let todaySpend = 0;
+  const untrackedSet = new Set<string>();
+  const recentCutoff = nowMs - 15 * 60 * 1000;
   for (const r of todayRows) {
     if (r.cost !== null) {
       todaySpend += r.cost;
     } else if (stats[r.model]?.cost_per_token) {
       todaySpend += r.tokens * stats[r.model].cost_per_token!;
+    } else if (r.timestamp >= recentCutoff) {
+      untrackedSet.add(r.model);
     }
   }
 
@@ -175,6 +181,7 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
       historyDays: days,
       fetchedAt: new Date().toISOString(),
       todaySpend,
+      untrackedModelsToday: Array.from(untrackedSet),
     },
   } as Calibration;
 }

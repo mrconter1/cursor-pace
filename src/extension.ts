@@ -164,9 +164,17 @@ async function runRefresh(context: vscode.ExtensionContext) {
     const calibrationPath = getCalibrationPath(context);
     fs.writeFileSync(calibrationPath, JSON.stringify(calibration, null, 2));
 
-    const todaySpend = (calibration._meta as { todaySpend?: number }).todaySpend ?? 0;
+    const meta = calibration._meta as { todaySpend?: number; untrackedModelsToday?: string[] };
+    const todaySpend = meta.todaySpend ?? 0;
+    const untrackedModels = meta.untrackedModelsToday ?? [];
     const { dailyBudget } = getDailyBudget(context);
     updateStatusBar(todaySpend, dailyBudget);
+
+    if (untrackedModels.length > 0) {
+      vscode.window.showWarningMessage(
+        `Cursor Pace: No price data for ${untrackedModels.join(", ")} — spend from these models can't be tracked.`
+      );
+    }
 
     const pct = dailyBudget > 0 ? Math.round((todaySpend / dailyBudget) * 100) : 0;
     if (pct >= 100) {
