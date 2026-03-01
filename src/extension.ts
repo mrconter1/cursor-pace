@@ -6,6 +6,9 @@ import { fetchCalibration } from "./api";
 
 let statusBarItem: vscode.StatusBarItem;
 let dashboardPanel: vscode.WebviewPanel | undefined;
+let refreshTimer: NodeJS.Timeout | undefined;
+
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 function getCalibrationPath(context: vscode.ExtensionContext): string {
   return path.join(context.globalStorageUri.fsPath, "cost_calibration.json");
@@ -34,10 +37,11 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // In development, auto-refresh on every activation so F5 always gives fresh data
-  if (context.extensionMode === vscode.ExtensionMode.Development) {
+  void runRefresh(context);
+
+  refreshTimer = setInterval(() => {
     void runRefresh(context);
-  }
+  }, REFRESH_INTERVAL_MS);
 }
 
 function openDashboard(context: vscode.ExtensionContext) {
@@ -438,4 +442,9 @@ function getWebviewHtml(
 </html>`;
 }
 
-export function deactivate() {}
+export function deactivate() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  }
+}
