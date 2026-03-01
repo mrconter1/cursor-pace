@@ -14,13 +14,15 @@ Every 5 minutes, the extension refreshes and updates the status bar with your cu
 
 ## Install
 
-Download the latest `.vsix` from [Releases](../../releases), then:
+Download the latest `.vsix` from [Releases](https://github.com/mrconter1/cursor-pace/releases), then:
 
 ```
 cursor --install-extension cursor-pace-0.1.0.vsix
 ```
 
 Or install from the command palette: `Extensions: Install from VSIX...`
+
+After installing, reload the window with `Ctrl+Shift+P` → `Developer: Reload Window`.
 
 ## Development
 

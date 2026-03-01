@@ -1,5 +1,6 @@
 node_modules/
 out/
+*.vsix
 cost_calibration.json
 __pycache__/
 *.pyc

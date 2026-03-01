@@ -3,6 +3,11 @@
   "displayName": "Cursor Pace",
   "description": "Track and pace your Cursor AI spending with daily budget limits",
   "version": "0.1.0",
+  "publisher": "mrconter1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrconter1/cursor-pace"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -42,8 +47,22 @@
         "cursorPace.subscription": {
           "type": "string",
           "default": "ultra",
-          "enum": ["hobby", "pro", "pro_plus", "ultra", "teams", "custom"],
-          "enumDescriptions": ["Hobby (Free)", "Pro ($20/mo)", "Pro+ ($60/mo)", "Ultra ($200/mo)", "Teams ($40/user/mo)", "Custom"],
+          "enum": [
+            "hobby",
+            "pro",
+            "pro_plus",
+            "ultra",
+            "teams",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "Hobby (Free)",
+            "Pro ($20/mo)",
+            "Pro+ ($60/mo)",
+            "Ultra ($200/mo)",
+            "Teams ($40/user/mo)",
+            "Custom"
+          ],
           "description": "Your Cursor subscription plan"
         },
         "cursorPace.monthlyBudget": {
@@ -59,8 +78,14 @@
         "cursorPace.historyDays": {
           "type": "number",
           "default": 90,
-          "enum": [30, 90],
-          "enumDescriptions": ["Last 30 days", "Last 3 months"],
+          "enum": [
+            30,
+            90
+          ],
+          "enumDescriptions": [
+            "Last 30 days",
+            "Last 3 months"
+          ],
           "description": "How far back to fetch usage history for cost calibration"
         }
       }
@@ -75,6 +100,7 @@
     "@types/node": "^20.0.0",
     "@types/sql.js": "^1.4.9",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.7.1",
     "typescript": "^5.3.0"
   },
   "dependencies": {
