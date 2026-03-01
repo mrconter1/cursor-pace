@@ -10,7 +10,13 @@ export interface ModelStats {
   total_estimated_cost: number | null;
 }
 
-export type Calibration = Record<string, ModelStats>;
+export interface CalibrationMeta {
+  activeDays: number;
+  historyDays: number;
+  fetchedAt: string;
+}
+
+export type Calibration = Record<string, ModelStats> & { _meta: CalibrationMeta };
 
 function httpsGet(url: string, cookie: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -77,6 +83,18 @@ function emptyStats(): ModelStats {
   };
 }
 
+function inferActiveDays(requestsPerDay: Map<string, number>): number {
+  if (requestsPerDay.size === 0) return 0;
+
+  const counts = Array.from(requestsPerDay.values());
+  const mean = counts.reduce((a, b) => a + b, 0) / counts.length;
+  const variance = counts.reduce((sum, c) => sum + (c - mean) ** 2, 0) / counts.length;
+  const std = Math.sqrt(variance);
+
+  const lo = mean - std;
+  return counts.filter((c) => c >= lo).length;
+}
+
 export async function fetchCalibration(token: string, days = 30): Promise<Calibration> {
   const nowMs = Date.now();
   const startMs = nowMs - days * 24 * 60 * 60 * 1000;
@@ -86,16 +104,22 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
   const rows = parseCsv(raw);
 
   const stats: Record<string, ModelStats> = {};
+  const requestsPerDay = new Map<string, number>();
 
   for (const row of rows) {
     const model = row["Model"] ?? "";
     const kind = row["Kind"] ?? "";
+    const dateRaw = row["Date"] ?? "";
     const total = parseInt(row["Total Tokens"] ?? "0", 10) || 0;
     const inputW = parseInt(row["Input (w/ Cache Write)"] ?? "0", 10) || 0;
     const inputWo = parseInt(row["Input (w/o Cache Write)"] ?? "0", 10) || 0;
     const cacheRead = parseInt(row["Cache Read"] ?? "0", 10) || 0;
     const output = parseInt(row["Output Tokens"] ?? "0", 10) || 0;
     const costRaw = row["Cost"] ?? "";
+
+    // Track requests per day (YYYY-MM-DD)
+    const dateKey = dateRaw.slice(0, 10);
+    if (dateKey) requestsPerDay.set(dateKey, (requestsPerDay.get(dateKey) ?? 0) + 1);
 
     if (!stats[model]) stats[model] = emptyStats();
     const s = stats[model];
@@ -122,5 +146,14 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
     }
   }
 
-  return stats;
+  const activeDays = inferActiveDays(requestsPerDay);
+
+  return {
+    ...stats,
+    _meta: {
+      activeDays,
+      historyDays: days,
+      fetchedAt: new Date().toISOString(),
+    },
+  } as Calibration;
 }

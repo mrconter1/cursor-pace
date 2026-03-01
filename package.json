@@ -37,11 +37,6 @@
           "default": 8,
           "description": "Working hours per day used to compute hourly pace"
         },
-        "cursorPace.workingDaysPerMonth": {
-          "type": "number",
-          "default": 22,
-          "description": "Working days per month used to compute hourly pace"
-        },
         "cursorPace.warnThreshold": {
           "type": "number",
           "default": 80,
@@ -49,7 +44,7 @@
         },
         "cursorPace.historyDays": {
           "type": "number",
-          "default": 30,
+          "default": 90,
           "enum": [30, 90],
           "enumDescriptions": ["Last 30 days", "Last 3 months"],
           "description": "How far back to fetch usage history for cost calibration"

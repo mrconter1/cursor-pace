@@ -65,7 +65,6 @@ function openDashboard(context: vscode.ExtensionContext) {
       const cfg = vscode.workspace.getConfiguration("cursorPace");
       cfg.update("monthlyBudget", msg.monthlyBudget, true);
       cfg.update("workingHoursPerDay", msg.workingHoursPerDay, true);
-      cfg.update("workingDaysPerMonth", msg.workingDaysPerMonth, true);
       cfg.update("warnThreshold", msg.warnThreshold, true);
       cfg.update("historyDays", msg.historyDays, true);
       vscode.window.showInformationMessage("Cursor Pace settings saved.");
@@ -93,12 +92,13 @@ function updateWebview(context: vscode.ExtensionContext) {
   }
 
   const cfg = vscode.workspace.getConfiguration("cursorPace");
+  const meta = (calibration as Record<string, unknown>)["_meta"] as { activeDays?: number; historyDays?: number } | undefined;
   const settings = {
     monthlyBudget: cfg.get<number>("monthlyBudget", 200),
     workingHoursPerDay: cfg.get<number>("workingHoursPerDay", 8),
-    workingDaysPerMonth: cfg.get<number>("workingDaysPerMonth", 22),
     warnThreshold: cfg.get<number>("warnThreshold", 80),
-    historyDays: cfg.get<number>("historyDays", 30),
+    historyDays: cfg.get<number>("historyDays", 90),
+    activeDays: meta?.activeDays ?? null,
   };
 
   dashboardPanel.webview.html = getWebviewHtml(calibration, settings, lastSyncedAt);
@@ -108,7 +108,7 @@ async function runRefresh(context: vscode.ExtensionContext) {
   statusBarItem.text = "$(sync~spin) Refreshing...";
   try {
     const token = await getSessionToken(context.extensionPath);
-    const historyDays = vscode.workspace.getConfiguration("cursorPace").get<number>("historyDays", 30);
+    const historyDays = vscode.workspace.getConfiguration("cursorPace").get<number>("historyDays", 90);
     const calibration = await fetchCalibration(token, historyDays);
     const calibrationPath = getCalibrationPath(context);
     fs.writeFileSync(calibrationPath, JSON.stringify(calibration, null, 2));
@@ -137,15 +137,17 @@ function getWebviewHtml(
   settings: {
     monthlyBudget: number;
     workingHoursPerDay: number;
-    workingDaysPerMonth: number;
     warnThreshold: number;
     historyDays: number;
+    activeDays: number | null;
   },
   lastSyncedAt: Date | null
 ): string {
-  const hourlyBudget =
-    settings.monthlyBudget /
-    (settings.workingDaysPerMonth * settings.workingHoursPerDay);
+  // Scale active days from history window to a 30-day month equivalent
+  const activeDaysPerMonth = settings.activeDays !== null
+    ? Math.round(settings.activeDays / settings.historyDays * 30)
+    : 22;
+  const hourlyBudget = settings.monthlyBudget / (activeDaysPerMonth * settings.workingHoursPerDay);
 
   type ModelStats = {
     requests: number;
@@ -157,11 +159,14 @@ function getWebviewHtml(
     total_estimated_cost: number | null;
   };
 
-  const models = Object.entries(calibration as Record<string, ModelStats>)
+  const modelEntries = Object.entries(calibration as Record<string, ModelStats>)
+    .filter(([key]) => key !== "_meta");
+
+  const models = modelEntries
     .filter(([, s]) => s.cost_per_token !== null)
     .sort((a, b) => (b[1].total_estimated_cost ?? 0) - (a[1].total_estimated_cost ?? 0));
 
-  const noDataModels = Object.entries(calibration as Record<string, ModelStats>)
+  const noDataModels = modelEntries
     .filter(([, s]) => s.cost_per_token === null);
 
   const hasData = models.length > 0;
@@ -243,6 +248,9 @@ function getWebviewHtml(
   button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
   button.secondary:hover { background: var(--table-header); }
   .empty { color: var(--muted); padding: 20px 0; }
+  .info-badge { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font-size: 10px; font-weight: 700; cursor: default; position: relative; margin-left: 5px; vertical-align: middle; line-height: 1; }
+  .info-badge:hover .tooltip { display: block; }
+  .tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--vscode-editorHoverWidget-background, #252526); border: 1px solid var(--vscode-editorHoverWidget-border, #454545); color: var(--vscode-editorHoverWidget-foreground, #ccc); font-size: 11px; font-weight: 400; padding: 6px 10px; border-radius: 4px; white-space: nowrap; z-index: 10; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -255,6 +263,12 @@ function getWebviewHtml(
     <div class="card">
       <div class="card-label">Monthly Budget</div>
       <div class="card-value">$${settings.monthlyBudget} <span class="card-unit">/ mo</span></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Active Days
+        <span class="info-badge">i<span class="tooltip">Days with requests ≥ (avg − 1 std dev) in your history.&#10;Excludes very low-usage days, keeps crunch days.</span></span>
+      </div>
+      <div class="card-value">${activeDaysPerMonth} <span class="card-unit">/ mo</span></div>
     </div>
     <div class="card">
       <div class="card-label">Hourly Budget</div>
@@ -299,17 +313,13 @@ function getWebviewHtml(
       <input type="number" id="workingHoursPerDay" value="${settings.workingHoursPerDay}" min="1" max="24" />
     </div>
     <div class="field">
-      <label>Working Days / Month</label>
-      <input type="number" id="workingDaysPerMonth" value="${settings.workingDaysPerMonth}" min="1" max="31" />
-    </div>
-    <div class="field">
       <label>Warn Threshold (%)</label>
       <input type="number" id="warnThreshold" value="${settings.warnThreshold}" min="1" max="100" />
     </div>
     <div class="field" style="grid-column: 1 / -1">
       <label>Price History Window</label>
       <select id="historyDays">
-        <option value="30" ${settings.historyDays === 30 ? "selected" : ""}>Last 30 days</option>
+        <option value="30" ${settings.historyDays !== 90 ? "selected" : ""}>Last 30 days</option>
         <option value="90" ${settings.historyDays === 90 ? "selected" : ""}>Last 3 months</option>
       </select>
     </div>
@@ -327,7 +337,6 @@ function getWebviewHtml(
       type: 'saveSettings',
       monthlyBudget: +document.getElementById('monthlyBudget').value,
       workingHoursPerDay: +document.getElementById('workingHoursPerDay').value,
-      workingDaysPerMonth: +document.getElementById('workingDaysPerMonth').value,
       warnThreshold: +document.getElementById('warnThreshold').value,
       historyDays: +document.getElementById('historyDays').value,
     });
