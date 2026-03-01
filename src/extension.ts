@@ -63,6 +63,7 @@ function openDashboard(context: vscode.ExtensionContext) {
     }
     if (msg.type === "saveSettings") {
       const cfg = vscode.workspace.getConfiguration("cursorPace");
+      cfg.update("subscription", msg.subscription, true);
       cfg.update("monthlyBudget", msg.monthlyBudget, true);
       cfg.update("workingHoursPerDay", msg.workingHoursPerDay, true);
       cfg.update("warnThreshold", msg.warnThreshold, true);
@@ -94,6 +95,7 @@ function updateWebview(context: vscode.ExtensionContext) {
   const cfg = vscode.workspace.getConfiguration("cursorPace");
   const meta = (calibration as Record<string, unknown>)["_meta"] as { activeDays?: number; historyDays?: number } | undefined;
   const settings = {
+    subscription: cfg.get<string>("subscription", "ultra"),
     monthlyBudget: cfg.get<number>("monthlyBudget", 200),
     workingHoursPerDay: cfg.get<number>("workingHoursPerDay", 8),
     warnThreshold: cfg.get<number>("warnThreshold", 80),
@@ -132,9 +134,19 @@ function timeSince(date: Date): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+const SUBSCRIPTION_BUDGETS: Record<string, number | null> = {
+  hobby: 0,
+  pro: 20,
+  pro_plus: 60,
+  ultra: 200,
+  teams: 40,
+  custom: null,
+};
+
 function getWebviewHtml(
   calibration: Record<string, unknown>,
   settings: {
+    subscription: string;
     monthlyBudget: number;
     workingHoursPerDay: number;
     warnThreshold: number;
@@ -304,9 +316,20 @@ function getWebviewHtml(
 <div class="section">
   <div class="section-title">Settings</div>
   <div class="settings-grid">
+    <div class="field" style="grid-column: 1 / -1">
+      <label>Subscription Plan</label>
+      <select id="subscription" onchange="onSubscriptionChange(this.value)">
+        <option value="hobby"   ${settings.subscription === "hobby"    ? "selected" : ""}>Hobby — Free</option>
+        <option value="pro"     ${settings.subscription === "pro"      ? "selected" : ""}>Pro — $20 / mo</option>
+        <option value="pro_plus"${settings.subscription === "pro_plus" ? "selected" : ""}>Pro+ — $60 / mo</option>
+        <option value="ultra"   ${settings.subscription === "ultra"    ? "selected" : ""}>Ultra — $200 / mo</option>
+        <option value="teams"   ${settings.subscription === "teams"    ? "selected" : ""}>Teams — $40 / user / mo</option>
+        <option value="custom"  ${settings.subscription === "custom"   ? "selected" : ""}>Custom</option>
+      </select>
+    </div>
     <div class="field">
       <label>Monthly Budget ($)</label>
-      <input type="number" id="monthlyBudget" value="${settings.monthlyBudget}" min="1" />
+      <input type="number" id="monthlyBudget" value="${settings.monthlyBudget}" min="0" />
     </div>
     <div class="field">
       <label>Working Hours / Day</label>
@@ -332,9 +355,17 @@ function getWebviewHtml(
 
 <script>
   const vscode = acquireVsCodeApi();
+  const BUDGETS = ${JSON.stringify(SUBSCRIPTION_BUDGETS)};
+  function onSubscriptionChange(plan) {
+    const budget = BUDGETS[plan];
+    if (budget !== null && budget !== undefined) {
+      document.getElementById('monthlyBudget').value = budget;
+    }
+  }
   function saveSettings() {
     vscode.postMessage({
       type: 'saveSettings',
+      subscription: document.getElementById('subscription').value,
       monthlyBudget: +document.getElementById('monthlyBudget').value,
       workingHoursPerDay: +document.getElementById('workingHoursPerDay').value,
       warnThreshold: +document.getElementById('warnThreshold').value,

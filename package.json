@@ -27,6 +27,13 @@
     "configuration": {
       "title": "Cursor Pace",
       "properties": {
+        "cursorPace.subscription": {
+          "type": "string",
+          "default": "ultra",
+          "enum": ["hobby", "pro", "pro_plus", "ultra", "teams", "custom"],
+          "enumDescriptions": ["Hobby (Free)", "Pro ($20/mo)", "Pro+ ($60/mo)", "Ultra ($200/mo)", "Teams ($40/user/mo)", "Custom"],
+          "description": "Your Cursor subscription plan"
+        },
         "cursorPace.monthlyBudget": {
           "type": "number",
           "default": 200,
