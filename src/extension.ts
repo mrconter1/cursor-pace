@@ -2,12 +2,19 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { getSessionToken } from "./auth";
-import { fetchCalibration, Calibration } from "./api";
+import { fetchCalibration } from "./api";
 
 let statusBarItem: vscode.StatusBarItem;
 let dashboardPanel: vscode.WebviewPanel | undefined;
 
+function getCalibrationPath(context: vscode.ExtensionContext): string {
+  return path.join(context.globalStorageUri.fsPath, "cost_calibration.json");
+}
+
 export function activate(context: vscode.ExtensionContext) {
+  // Ensure global storage directory exists
+  fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
+
   statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     100
@@ -23,9 +30,14 @@ export function activate(context: vscode.ExtensionContext) {
       openDashboard(context);
     }),
     vscode.commands.registerCommand("cursorPace.refresh", () => {
-      runRefresh(context);
+      void runRefresh(context);
     })
   );
+
+  // In development, auto-refresh on every activation so F5 always gives fresh data
+  if (context.extensionMode === vscode.ExtensionMode.Development) {
+    void runRefresh(context);
+  }
 }
 
 function openDashboard(context: vscode.ExtensionContext) {
@@ -66,11 +78,14 @@ function openDashboard(context: vscode.ExtensionContext) {
 function updateWebview(context: vscode.ExtensionContext) {
   if (!dashboardPanel) return;
 
-  const calibrationPath = path.join(context.extensionPath, "cost_calibration.json");
+  const calibrationPath = getCalibrationPath(context);
   let calibration: Record<string, unknown> = {};
+  let lastSyncedAt: Date | null = null;
+
   if (fs.existsSync(calibrationPath)) {
     try {
       calibration = JSON.parse(fs.readFileSync(calibrationPath, "utf8"));
+      lastSyncedAt = fs.statSync(calibrationPath).mtime;
     } catch {
       // ignore parse errors
     }
@@ -84,7 +99,7 @@ function updateWebview(context: vscode.ExtensionContext) {
     warnThreshold: cfg.get<number>("warnThreshold", 80),
   };
 
-  dashboardPanel.webview.html = getWebviewHtml(calibration, settings);
+  dashboardPanel.webview.html = getWebviewHtml(calibration, settings, lastSyncedAt);
 }
 
 async function runRefresh(context: vscode.ExtensionContext) {
@@ -92,7 +107,7 @@ async function runRefresh(context: vscode.ExtensionContext) {
   try {
     const token = await getSessionToken(context.extensionPath);
     const calibration = await fetchCalibration(token);
-    const calibrationPath = path.join(context.extensionPath, "cost_calibration.json");
+    const calibrationPath = getCalibrationPath(context);
     fs.writeFileSync(calibrationPath, JSON.stringify(calibration, null, 2));
     statusBarItem.text = "$(pulse) Cursor Pace";
     vscode.window.showInformationMessage("Cursor Pace: Data refreshed.");
@@ -104,6 +119,16 @@ async function runRefresh(context: vscode.ExtensionContext) {
   }
 }
 
+function timeSince(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function getWebviewHtml(
   calibration: Record<string, unknown>,
   settings: {
@@ -111,7 +136,8 @@ function getWebviewHtml(
     workingHoursPerDay: number;
     workingDaysPerMonth: number;
     warnThreshold: number;
-  }
+  },
+  lastSyncedAt: Date | null
 ): string {
   const hourlyBudget =
     settings.monthlyBudget /
@@ -215,7 +241,7 @@ function getWebviewHtml(
 </head>
 <body>
 <h1>Cursor Pace</h1>
-<p class="subtitle">Track and pace your Cursor AI spending</p>
+<p class="subtitle">Track and pace your Cursor AI spending &nbsp;·&nbsp; Last synced: ${lastSyncedAt ? timeSince(lastSyncedAt) : "never"}</p>
 
 <div class="section">
   <div class="section-title">Hourly Pace</div>
