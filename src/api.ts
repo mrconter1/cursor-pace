@@ -18,6 +18,7 @@ export interface CalibrationMeta {
   monthSpend: number;
   monthActiveDaysSoFar: number;
   untrackedModelsToday: string[];
+  currentModel: string;
 }
 
 export type Calibration = Record<string, ModelStats> & { _meta: CalibrationMeta };
@@ -118,6 +119,9 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
   const monthRows: CostRow[] = [];
   const monthActiveDaysSet = new Set<string>();
 
+  let mostRecentTimestamp = 0;
+  let mostRecentModel = "unknown";
+
   for (const row of rows) {
     const model = row["Model"] ?? "";
     const kind = row["Kind"] ?? "";
@@ -131,6 +135,12 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
 
     const dateKey = dateRaw.slice(0, 10);
     if (dateKey) requestsPerDay.set(dateKey, (requestsPerDay.get(dateKey) ?? 0) + 1);
+
+    const timestamp = new Date(dateRaw).getTime() || 0;
+    if (timestamp > mostRecentTimestamp) {
+      mostRecentTimestamp = timestamp;
+      mostRecentModel = model;
+    }
 
     if (!stats[model]) stats[model] = emptyStats();
     const s = stats[model];
@@ -152,7 +162,6 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
       const directCost = (kind === "On-Demand" && costRaw !== "Included" && costRaw !== "")
         ? parseFloat(costRaw) || null
         : null;
-      const timestamp = new Date(dateRaw).getTime() || 0;
       const row: CostRow = { model, tokens: total, cost: directCost, timestamp };
       if (dateKey === todayKey) {
         todayRows.push(row);
@@ -215,6 +224,7 @@ export async function fetchCalibration(token: string, days = 30): Promise<Calibr
       monthSpend,
       monthActiveDaysSoFar: monthActiveDaysSet.size,
       untrackedModelsToday: Array.from(untrackedSet),
+      currentModel: mostRecentModel,
     },
   } as Calibration;
 }

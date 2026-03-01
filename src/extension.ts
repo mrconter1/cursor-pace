@@ -47,8 +47,9 @@ export function activate(context: vscode.ExtensionContext) {
       const { dailyBudget } = getDailyBudget(context);
       const fakeSpend = dailyBudget * 1.15;
       updateStatusBar(fakeSpend, dailyBudget);
-      vscode.window.showErrorMessage(
-        `Cursor Pace: You've used 115% of your daily budget ($${fakeSpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Switch to auto to avoid extra costs!`
+      void vscode.window.showErrorMessage(
+        `Cursor Pace [Debug]: You've used 115% of your daily budget. You are currently using Composer (claude-4-sonnet). Please switch to 'auto' to avoid extra costs!`,
+        { modal: true }
       );
     }),
     vscode.commands.registerCommand("cursorPace.debugUntracked", () => {
@@ -93,14 +94,14 @@ function openDashboard(context: vscode.ExtensionContext) {
       cfg.update("warnThreshold", msg.warnThreshold, true);
       cfg.update("historyDays", msg.historyDays, true);
       vscode.window.showInformationMessage("Cursor Pace settings saved.");
-      updateWebview(context);
+      void updateWebview(context);
     }
   });
 
-  updateWebview(context);
+  void updateWebview(context);
 }
 
-function updateWebview(context: vscode.ExtensionContext) {
+async function updateWebview(context: vscode.ExtensionContext) {
   if (!dashboardPanel) return;
 
   const calibrationPath = getCalibrationPath(context);
@@ -121,6 +122,10 @@ function updateWebview(context: vscode.ExtensionContext) {
   const metaAny = meta as Record<string, unknown> | undefined;
   const todaySpend = metaAny?.todaySpend as number ?? 0;
   const monthSpend = metaAny?.monthSpend as number ?? 0;
+  
+  const calibrationMeta = calibration["_meta"] as { currentModel?: string } | undefined;
+  const currentModels = { composer: calibrationMeta?.currentModel ?? "unknown", cmdK: "unknown" };
+
   const settings = {
     subscription: cfg.get<string>("subscription", "ultra"),
     monthlyBudget: cfg.get<number>("monthlyBudget", 200),
@@ -129,6 +134,7 @@ function updateWebview(context: vscode.ExtensionContext) {
     activeDays: meta?.activeDays ?? null,
     todaySpend,
     monthSpend,
+    currentModels,
   };
 
   const { dailyBudget, flatDailyBudget } = getDailyBudget(context);
@@ -201,11 +207,17 @@ async function runRefresh(context: vscode.ExtensionContext) {
     const calibrationPath = getCalibrationPath(context);
     fs.writeFileSync(calibrationPath, JSON.stringify(calibration, null, 2));
 
-    const meta = calibration._meta as { todaySpend?: number; untrackedModelsToday?: string[] };
+    const meta = calibration._meta as { todaySpend?: number; untrackedModelsToday?: string[]; currentModel?: string };
     const todaySpend = meta.todaySpend ?? 0;
     const untrackedModels = meta.untrackedModelsToday ?? [];
+    const currentModel = meta.currentModel ?? "unknown";
     const { dailyBudget } = getDailyBudget(context);
     updateStatusBar(todaySpend, dailyBudget);
+
+    const expensiveModels: string[] = [];
+    if (currentModel.toLowerCase() !== "auto" && currentModel !== "unknown") {
+      expensiveModels.push(currentModel);
+    }
 
     if (untrackedModels.length > 0) {
       vscode.window.showWarningMessage(
@@ -215,17 +227,24 @@ async function runRefresh(context: vscode.ExtensionContext) {
 
     const pct = dailyBudget > 0 ? Math.round((todaySpend / dailyBudget) * 100) : 0;
     if (pct >= 100) {
-      void vscode.window.showErrorMessage(
-        `Cursor Pace: You've used ${pct}% of your daily budget ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Switch to auto to avoid extra costs!`,
-        { modal: true }
-      );
+      if (expensiveModels.length > 0) {
+        void vscode.window.showErrorMessage(
+          `Cursor Pace: DAILY BUDGET EXCEEDED (${pct}%). Composer is set to ${expensiveModels.join(", ")}. Switch to auto!`,
+          { modal: true }
+        );
+      } else {
+        // Already on auto, but over budget - milder warning
+        vscode.window.showWarningMessage(
+          `Cursor Pace: You are ${pct}% over your daily budget ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Good job using auto!`
+        );
+      }
     } else if (pct >= warnThreshold) {
       vscode.window.showWarningMessage(
         `Cursor Pace: ${pct}% of daily budget used ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}).`
       );
     }
 
-    updateWebview(context);
+    void updateWebview(context);
   } catch (err: unknown) {
     statusBarItem.text = "$(error) Cursor Pace";
     statusBarItem.backgroundColor = undefined;
@@ -270,6 +289,7 @@ function getWebviewHtml(
     activeDays: number | null;
     todaySpend: number;
     monthSpend: number;
+    currentModels: { composer: string; cmdK: string };
   },
   lastSyncedAt: Date | null,
   dailyBudget: number,
@@ -445,6 +465,10 @@ function getWebviewHtml(
         <span class="info-badge">i<span class="tooltip">Days with requests ≥ (avg − 1 std dev) in your history.&#10;Excludes very low-usage days, keeps crunch days.</span></span>
       </div>
       <div class="card-value">${activeDaysPerMonth} <span class="card-unit">/ mo</span></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Composer Model</div>
+      <div class="card-value" style="font-size:14px; font-family:var(--vscode-editor-font-family); ${settings.currentModels.composer.toLowerCase() !== 'auto' ? 'color:var(--vscode-editorWarning-foreground)' : ''}">${settings.currentModels.composer}</div>
     </div>
     <div class="card">
       <div class="card-label">Warn At</div>
