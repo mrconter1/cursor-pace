@@ -244,6 +244,10 @@ function getWebviewHtml(
     --table-header: var(--vscode-editorGroupHeader-tabsBackground);
     --highlight: var(--vscode-focusBorder);
     --muted: var(--vscode-descriptionForeground);
+    --dropdown-bg: var(--vscode-dropdown-background);
+    --dropdown-fg: var(--vscode-dropdown-foreground);
+    --dropdown-border: var(--vscode-dropdown-border);
+    --dropdown-list-bg: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background));
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--fg); background: var(--bg); padding: 24px; }
@@ -265,8 +269,13 @@ function getWebviewHtml(
   .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
   .field input { width: 100%; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--input-border, var(--border)); border-radius: 3px; padding: 5px 8px; font-size: 13px; outline: none; }
   .field input:focus { border-color: var(--highlight); }
-  .field select { width: 100%; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--input-border, var(--border)); border-radius: 3px; padding: 5px 8px; font-size: 13px; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; cursor: pointer; }
+  body.vscode-dark .field input[type=number], body.vscode-high-contrast .field input[type=number] { color-scheme: dark; }
+  body.vscode-light .field input[type=number] { color-scheme: light; }
+  .field select { width: 100%; background: var(--dropdown-bg); color: var(--dropdown-fg); border: 1px solid var(--dropdown-border); border-radius: 3px; padding: 5px 8px; font-size: 13px; outline: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 8px center; cursor: pointer; }
   .field select:focus { border-color: var(--highlight); }
+  .field select option { background: var(--dropdown-list-bg); color: var(--dropdown-fg); }
+  body.vscode-dark .field select, body.vscode-high-contrast .field select { color-scheme: dark; }
+  body.vscode-light .field select { color-scheme: light; }
   .actions { display: flex; gap: 8px; margin-top: 6px; }
   button { background: var(--btn-bg); color: var(--btn-fg); border: none; border-radius: 3px; padding: 6px 14px; font-size: 12px; cursor: pointer; }
   button:hover { background: var(--btn-hover); }
