@@ -110,7 +110,13 @@ async function runRefresh(context: vscode.ExtensionContext) {
   statusBarItem.text = "$(sync~spin) Refreshing...";
   try {
     const token = await getSessionToken(context.extensionPath);
-    const historyDays = vscode.workspace.getConfiguration("cursorPace").get<number>("historyDays", 90);
+    const cfg = vscode.workspace.getConfiguration("cursorPace");
+    const historyDays = cfg.get<number>("historyDays", 90);
+    const subscription = cfg.get<string>("subscription", "ultra");
+    const planBudget = PLANS[subscription]?.effectiveBudget;
+    if (planBudget !== null && planBudget !== undefined) {
+      cfg.update("monthlyBudget", planBudget, true);
+    }
     const calibration = await fetchCalibration(token, historyDays);
     const calibrationPath = getCalibrationPath(context);
     fs.writeFileSync(calibrationPath, JSON.stringify(calibration, null, 2));
@@ -134,13 +140,20 @@ function timeSince(date: Date): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-const SUBSCRIPTION_BUDGETS: Record<string, number | null> = {
-  hobby: 0,
-  pro: 20,
-  pro_plus: 60,
-  ultra: 200,
-  teams: 40,
-  custom: null,
+interface PlanInfo {
+  label: string;
+  price: number | null;
+  effectiveBudget: number | null;
+  note: string;
+}
+
+const PLANS: Record<string, PlanInfo> = {
+  hobby:    { label: "Hobby",   price: 0,    effectiveBudget: 0,    note: "Free — very limited model access" },
+  pro:      { label: "Pro",     price: 20,   effectiveBudget: 20,   note: "$20/mo — ~$20 in model credits at API prices" },
+  pro_plus: { label: "Pro+",    price: 60,   effectiveBudget: 60,   note: "$60/mo — 3× Pro, ~$60 in model credits" },
+  ultra:    { label: "Ultra",   price: 200,  effectiveBudget: 400,  note: "$200/mo — 20× Pro, ~$400 in model credits (2× efficiency)" },
+  teams:    { label: "Teams",   price: 40,   effectiveBudget: 40,   note: "$40/user/mo — ~$40 in model credits per user" },
+  custom:   { label: "Custom",  price: null, effectiveBudget: null, note: "Set your own budget manually" },
 };
 
 function getWebviewHtml(
@@ -262,7 +275,7 @@ function getWebviewHtml(
   .empty { color: var(--muted); padding: 20px 0; }
   .info-badge { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font-size: 10px; font-weight: 700; cursor: default; position: relative; margin-left: 5px; vertical-align: middle; line-height: 1; }
   .info-badge:hover .tooltip { display: block; }
-  .tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--vscode-editorHoverWidget-background, #252526); border: 1px solid var(--vscode-editorHoverWidget-border, #454545); color: var(--vscode-editorHoverWidget-foreground, #ccc); font-size: 11px; font-weight: 400; padding: 6px 10px; border-radius: 4px; white-space: nowrap; z-index: 10; pointer-events: none; }
+  .tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--vscode-editorHoverWidget-background, #252526); border: 1px solid var(--vscode-editorHoverWidget-border, #454545); color: var(--vscode-editorHoverWidget-foreground, #ccc); font-size: 11px; font-weight: 400; padding: 6px 10px; border-radius: 4px; white-space: normal; width: max-content; max-width: 220px; line-height: 1.5; z-index: 10; pointer-events: none; }
 </style>
 </head>
 <body>
@@ -273,7 +286,9 @@ function getWebviewHtml(
   <div class="section-title">Hourly Pace</div>
   <div class="pace-card">
     <div class="card">
-      <div class="card-label">Monthly Budget</div>
+      <div class="card-label">Monthly Budget
+        <span class="info-badge">i<span class="tooltip">${PLANS[settings.subscription]?.note ?? "Custom budget"}</span></span>
+      </div>
       <div class="card-value">$${settings.monthlyBudget} <span class="card-unit">/ mo</span></div>
     </div>
     <div class="card">
@@ -319,17 +334,20 @@ function getWebviewHtml(
     <div class="field" style="grid-column: 1 / -1">
       <label>Subscription Plan</label>
       <select id="subscription" onchange="onSubscriptionChange(this.value)">
-        <option value="hobby"   ${settings.subscription === "hobby"    ? "selected" : ""}>Hobby — Free</option>
-        <option value="pro"     ${settings.subscription === "pro"      ? "selected" : ""}>Pro — $20 / mo</option>
-        <option value="pro_plus"${settings.subscription === "pro_plus" ? "selected" : ""}>Pro+ — $60 / mo</option>
-        <option value="ultra"   ${settings.subscription === "ultra"    ? "selected" : ""}>Ultra — $200 / mo</option>
-        <option value="teams"   ${settings.subscription === "teams"    ? "selected" : ""}>Teams — $40 / user / mo</option>
-        <option value="custom"  ${settings.subscription === "custom"   ? "selected" : ""}>Custom</option>
+        <option value="hobby"    ${settings.subscription === "hobby"    ? "selected" : ""}>Hobby — Free</option>
+        <option value="pro"      ${settings.subscription === "pro"      ? "selected" : ""}>Pro — $20/mo (~$20 in credits)</option>
+        <option value="pro_plus" ${settings.subscription === "pro_plus" ? "selected" : ""}>Pro+ — $60/mo (~$60 in credits)</option>
+        <option value="ultra"    ${settings.subscription === "ultra"    ? "selected" : ""}>Ultra — $200/mo (~$400 in credits)</option>
+        <option value="teams"    ${settings.subscription === "teams"    ? "selected" : ""}>Teams — $40/user/mo (~$40 in credits)</option>
+        <option value="custom"   ${settings.subscription === "custom"   ? "selected" : ""}>Custom</option>
       </select>
     </div>
     <div class="field">
-      <label>Monthly Budget ($)</label>
-      <input type="number" id="monthlyBudget" value="${settings.monthlyBudget}" min="0" />
+      <label>
+        Effective Monthly Budget ($)
+        <span class="info-badge">i<span class="tooltip">${PLANS[settings.subscription]?.note ?? "Set your own budget"}</span></span>
+      </label>
+      <input type="number" id="monthlyBudget" value="${settings.monthlyBudget}" min="0" ${settings.subscription !== "custom" ? 'readonly style="opacity:0.6"' : ""} />
     </div>
     <div class="field">
       <label>Working Hours / Day</label>
@@ -355,11 +373,17 @@ function getWebviewHtml(
 
 <script>
   const vscode = acquireVsCodeApi();
-  const BUDGETS = ${JSON.stringify(SUBSCRIPTION_BUDGETS)};
+  const PLANS = ${JSON.stringify(PLANS)};
   function onSubscriptionChange(plan) {
-    const budget = BUDGETS[plan];
-    if (budget !== null && budget !== undefined) {
-      document.getElementById('monthlyBudget').value = budget;
+    const info = PLANS[plan];
+    const input = document.getElementById('monthlyBudget');
+    if (info && info.effectiveBudget !== null) {
+      input.value = info.effectiveBudget;
+      input.readOnly = true;
+      input.style.opacity = '0.6';
+    } else {
+      input.readOnly = false;
+      input.style.opacity = '1';
     }
   }
   function saveSettings() {
