@@ -8,7 +8,7 @@ let statusBarItem: vscode.StatusBarItem;
 let dashboardPanel: vscode.WebviewPanel | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
-const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const REFRESH_INTERVAL_MS = 30 * 1000;
 
 function getCalibrationPath(context: vscode.ExtensionContext): string {
   return path.join(context.globalStorageUri.fsPath, "cost_calibration.json");
@@ -215,8 +215,9 @@ async function runRefresh(context: vscode.ExtensionContext) {
 
     const pct = dailyBudget > 0 ? Math.round((todaySpend / dailyBudget) * 100) : 0;
     if (pct >= 100) {
-      vscode.window.showErrorMessage(
-        `Cursor Pace: You've used ${pct}% of your daily budget ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Switch to auto to avoid extra costs!`
+      void vscode.window.showErrorMessage(
+        `Cursor Pace: You've used ${pct}% of your daily budget ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Switch to auto to avoid extra costs!`,
+        { modal: true }
       );
     } else if (pct >= warnThreshold) {
       vscode.window.showWarningMessage(
