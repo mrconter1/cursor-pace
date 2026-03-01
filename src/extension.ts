@@ -9,6 +9,9 @@ let dashboardPanel: vscode.WebviewPanel | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 
 const REFRESH_INTERVAL_MS = 30 * 1000;
+const WARNING_THROTTLE_MS = 30 * 60 * 1000;
+
+let lastWarningShownAt = 0;
 
 function getCalibrationPath(context: vscode.ExtensionContext): string {
   return path.join(context.globalStorageUri.fsPath, "cost_calibration.json");
@@ -219,7 +222,11 @@ async function runRefresh(context: vscode.ExtensionContext) {
       expensiveModels.push(currentModel);
     }
 
-    if (untrackedModels.length > 0) {
+    const now = Date.now();
+    const mayShowWarning = now - lastWarningShownAt >= WARNING_THROTTLE_MS;
+
+    if (untrackedModels.length > 0 && mayShowWarning) {
+      lastWarningShownAt = now;
       vscode.window.showWarningMessage(
         `Cursor Pace: No price data for ${untrackedModels.join(", ")} — spend from these models can't be tracked.`
       );
@@ -232,13 +239,14 @@ async function runRefresh(context: vscode.ExtensionContext) {
           `Cursor Pace: DAILY BUDGET EXCEEDED (${pct}%). Composer is set to ${expensiveModels.join(", ")}. Switch to auto!`,
           { modal: true }
         );
-      } else {
-        // Already on auto, but over budget - milder warning
+      } else if (mayShowWarning) {
+        lastWarningShownAt = now;
         vscode.window.showWarningMessage(
           `Cursor Pace: You are ${pct}% over your daily budget ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Good job using auto!`
         );
       }
-    } else if (pct >= warnThreshold) {
+    } else if (pct >= warnThreshold && mayShowWarning) {
+      lastWarningShownAt = now;
       vscode.window.showWarningMessage(
         `Cursor Pace: ${pct}% of daily budget used ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}).`
       );
