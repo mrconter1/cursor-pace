@@ -1,3 +1,5 @@
+node_modules/
+out/
+cost_calibration.json
 __pycache__/
 *.pyc
-cost_calibration.json

@@ -1,0 +1,67 @@
+{
+  "name": "cursor-pace",
+  "displayName": "Cursor Pace",
+  "description": "Track and pace your Cursor AI spending with hourly budget limits",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cursorPace.openDashboard",
+        "title": "Cursor Pace: Open Dashboard"
+      },
+      {
+        "command": "cursorPace.refresh",
+        "title": "Cursor Pace: Refresh Usage Data"
+      }
+    ],
+    "configuration": {
+      "title": "Cursor Pace",
+      "properties": {
+        "cursorPace.monthlyBudget": {
+          "type": "number",
+          "default": 200,
+          "description": "Monthly budget in USD"
+        },
+        "cursorPace.workingHoursPerDay": {
+          "type": "number",
+          "default": 8,
+          "description": "Working hours per day used to compute hourly pace"
+        },
+        "cursorPace.workingDaysPerMonth": {
+          "type": "number",
+          "default": 22,
+          "description": "Working days per month used to compute hourly pace"
+        },
+        "cursorPace.warnThreshold": {
+          "type": "number",
+          "default": 80,
+          "description": "Warn when hourly spend reaches this % of hourly budget"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/sql.js": "^1.4.9",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "sql.js": "^1.14.0"
+  }
+}
