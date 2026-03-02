@@ -2,7 +2,7 @@
   "name": "cursor-pace",
   "displayName": "Cursor Pace",
   "description": "Track and pace your Cursor AI spending with daily budget limits",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "mrconter1",
   "repository": {
     "type": "git",

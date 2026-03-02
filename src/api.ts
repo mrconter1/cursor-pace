@@ -1,5 +1,3 @@
-import * as https from "https";
-
 export interface ModelStats {
   requests: number;
   total_tokens: number;
@@ -23,33 +21,21 @@ export interface CalibrationMeta {
 
 export type Calibration = Record<string, ModelStats> & { _meta: CalibrationMeta };
 
-function httpsGet(url: string, cookie: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
-    const options = {
-      hostname: parsed.hostname,
-      path: parsed.pathname + parsed.search,
-      method: "GET",
-      headers: {
-        "Cookie": `WorkosCursorSessionToken=${cookie}`,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      // Don't follow redirects — a redirect means auth failed
-      if (res.statusCode && res.statusCode >= 300) {
-        reject(new Error(`Auth failed (HTTP ${res.statusCode}). Session token may be expired.`));
-        return;
-      }
-      const chunks: Buffer[] = [];
-      res.on("data", (chunk) => chunks.push(chunk));
-      res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    });
-
-    req.on("error", reject);
-    req.end();
+async function httpsGet(url: string, cookie: string): Promise<string> {
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Cookie": `WorkosCursorSessionToken=${cookie}`,
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    },
+    redirect: "error",
   });
+
+  if (!res.ok) {
+    throw new Error(`Auth failed (HTTP ${res.status}). Session token may be expired.`);
+  }
+
+  return res.text();
 }
 
 function parseCsv(raw: string): Record<string, string>[] {
