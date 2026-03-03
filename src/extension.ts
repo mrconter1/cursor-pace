@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { getSessionToken } from "./auth";
-import { fetchCalibration } from "./api";
+import { fetchUsage, Prices, UsageResult } from "./api";
 
 let statusBarItem: vscode.StatusBarItem;
 let dashboardPanel: vscode.WebviewPanel | undefined;
@@ -10,15 +10,38 @@ let refreshTimer: NodeJS.Timeout | undefined;
 
 const REFRESH_INTERVAL_MS = 30 * 1000;
 const WARNING_THROTTLE_MS = 30 * 60 * 1000;
+const ACTIVE_DAYS_PER_MONTH = 22;
 
 let lastWarningShownAt = 0;
 
-function getCalibrationPath(context: vscode.ExtensionContext): string {
-  return path.join(context.globalStorageUri.fsPath, "cost_calibration.json");
+interface UsageCache extends UsageResult {
+  fetchedAt: string;
+}
+
+function getUsageCachePath(context: vscode.ExtensionContext): string {
+  return path.join(context.globalStorageUri.fsPath, "usage_cache.json");
+}
+
+function loadPrices(extensionPath: string): Prices {
+  const pricesPath = path.join(extensionPath, "prices.json");
+  try {
+    return JSON.parse(fs.readFileSync(pricesPath, "utf8")) as Prices;
+  } catch {
+    return {};
+  }
+}
+
+function loadUsageCache(context: vscode.ExtensionContext): UsageCache | null {
+  const cachePath = getUsageCachePath(context);
+  try {
+    if (fs.existsSync(cachePath)) {
+      return JSON.parse(fs.readFileSync(cachePath, "utf8")) as UsageCache;
+    }
+  } catch { /* ignore */ }
+  return null;
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  // Ensure global storage directory exists
   fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
 
   statusBarItem = vscode.window.createStatusBarItem(
@@ -51,7 +74,7 @@ export function activate(context: vscode.ExtensionContext) {
       const fakeSpend = dailyBudget * 1.15;
       updateStatusBar(fakeSpend, dailyBudget);
       void vscode.window.showErrorMessage(
-        `Cursor Pace [Debug]: You've used 115% of your daily budget. You are currently using Composer (claude-4-sonnet). Please switch to 'auto' to avoid extra costs!`,
+        `Cursor Pace [Debug]: You've used 115% of your daily budget. Please switch to 'auto' to avoid extra costs!`,
         { modal: true }
       );
     }),
@@ -95,7 +118,6 @@ function openDashboard(context: vscode.ExtensionContext) {
       cfg.update("subscription", msg.subscription, true);
       cfg.update("monthlyBudget", msg.monthlyBudget, true);
       cfg.update("warnThreshold", msg.warnThreshold, true);
-      cfg.update("historyDays", msg.historyDays, true);
       vscode.window.showInformationMessage("Cursor Pace settings saved.");
       void updateWebview(context);
     }
@@ -107,74 +129,41 @@ function openDashboard(context: vscode.ExtensionContext) {
 async function updateWebview(context: vscode.ExtensionContext) {
   if (!dashboardPanel) return;
 
-  const calibrationPath = getCalibrationPath(context);
-  let calibration: Record<string, unknown> = {};
-  let lastSyncedAt: Date | null = null;
-
-  if (fs.existsSync(calibrationPath)) {
-    try {
-      calibration = JSON.parse(fs.readFileSync(calibrationPath, "utf8"));
-      lastSyncedAt = fs.statSync(calibrationPath).mtime;
-    } catch {
-      // ignore parse errors
-    }
-  }
+  const cache = loadUsageCache(context);
+  const prices = loadPrices(context.extensionPath);
+  const lastSyncedAt = cache?.fetchedAt ? new Date(cache.fetchedAt) : null;
 
   const cfg = vscode.workspace.getConfiguration("cursorPace");
-  const meta = (calibration as Record<string, unknown>)["_meta"] as { activeDays?: number; historyDays?: number } | undefined;
-  const metaAny = meta as Record<string, unknown> | undefined;
-  const todaySpend = metaAny?.todaySpend as number ?? 0;
-  const monthSpend = metaAny?.monthSpend as number ?? 0;
-  
-  const calibrationMeta = calibration["_meta"] as { currentModel?: string } | undefined;
-  const currentModels = { composer: calibrationMeta?.currentModel ?? "unknown", cmdK: "unknown" };
-
   const settings = {
     subscription: cfg.get<string>("subscription", "ultra"),
     monthlyBudget: cfg.get<number>("monthlyBudget", 200),
     warnThreshold: cfg.get<number>("warnThreshold", 80),
-    historyDays: cfg.get<number>("historyDays", 90),
-    activeDays: meta?.activeDays ?? null,
-    todaySpend,
-    monthSpend,
-    currentModels,
+    todaySpend: cache?.todaySpend ?? 0,
+    monthSpend: cache?.monthSpend ?? 0,
+    currentModel: cache?.currentModel ?? "unknown",
+    monthActiveDaysSoFar: cache?.monthActiveDaysSoFar ?? 0,
   };
 
   const { dailyBudget, flatDailyBudget } = getDailyBudget(context);
-  dashboardPanel.webview.html = getWebviewHtml(calibration, settings, lastSyncedAt, dailyBudget, flatDailyBudget);
+  dashboardPanel.webview.html = getWebviewHtml(prices, settings, lastSyncedAt, dailyBudget, flatDailyBudget);
 }
 
-function getDailyBudget(context: vscode.ExtensionContext): { dailyBudget: number; flatDailyBudget: number; activeDaysPerMonth: number } {
+function getDailyBudget(context: vscode.ExtensionContext): { dailyBudget: number; flatDailyBudget: number } {
   const cfg = vscode.workspace.getConfiguration("cursorPace");
   const monthlyBudget = cfg.get<number>("monthlyBudget", 200);
-  const historyDays = cfg.get<number>("historyDays", 90);
 
-  const calibrationPath = getCalibrationPath(context);
-  let activeDays: number | null = null;
-  let monthSpend = 0;
-  let todaySpend = 0;
-  let monthActiveDaysSoFar = 0;
-  if (fs.existsSync(calibrationPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(calibrationPath, "utf8"));
-      activeDays = data._meta?.activeDays ?? null;
-      monthSpend = data._meta?.monthSpend ?? 0;
-      todaySpend = data._meta?.todaySpend ?? 0;
-      monthActiveDaysSoFar = data._meta?.monthActiveDaysSoFar ?? 0;
-    } catch { /* ignore */ }
-  }
+  const cache = loadUsageCache(context);
+  const todaySpend = cache?.todaySpend ?? 0;
+  const monthSpend = cache?.monthSpend ?? 0;
+  const monthActiveDaysSoFar = cache?.monthActiveDaysSoFar ?? 0;
 
-  const activeDaysPerMonth = activeDays !== null
-    ? Math.round(activeDays / historyDays * 30)
-    : 22;
-  const flatDailyBudget = monthlyBudget / activeDaysPerMonth;
-
+  const flatDailyBudget = monthlyBudget / ACTIVE_DAYS_PER_MONTH;
   const spentBeforeToday = monthSpend - todaySpend;
   const remainingBudget = monthlyBudget - spentBeforeToday;
-  const remainingActiveDays = Math.max(1, activeDaysPerMonth - monthActiveDaysSoFar);
+  const remainingActiveDays = Math.max(1, ACTIVE_DAYS_PER_MONTH - monthActiveDaysSoFar);
   const dailyBudget = Math.max(0, remainingBudget / remainingActiveDays);
 
-  return { dailyBudget, flatDailyBudget, activeDaysPerMonth };
+  return { dailyBudget, flatDailyBudget };
 }
 
 function updateStatusBar(todaySpend: number, dailyBudget: number) {
@@ -199,56 +188,51 @@ async function runRefresh(context: vscode.ExtensionContext) {
   try {
     const token = await getSessionToken(context.extensionPath);
     const cfg = vscode.workspace.getConfiguration("cursorPace");
-    const historyDays = cfg.get<number>("historyDays", 90);
     const subscription = cfg.get<string>("subscription", "ultra");
     const warnThreshold = cfg.get<number>("warnThreshold", 80);
     const planBudget = PLANS[subscription]?.effectiveBudget;
     if (planBudget !== null && planBudget !== undefined) {
       cfg.update("monthlyBudget", planBudget, true);
     }
-    const calibration = await fetchCalibration(token, historyDays);
-    const calibrationPath = getCalibrationPath(context);
-    fs.writeFileSync(calibrationPath, JSON.stringify(calibration, null, 2));
 
-    const meta = calibration._meta as { todaySpend?: number; untrackedModelsToday?: string[]; currentModel?: string };
-    const todaySpend = meta.todaySpend ?? 0;
-    const untrackedModels = meta.untrackedModelsToday ?? [];
-    const currentModel = meta.currentModel ?? "unknown";
+    const prices = loadPrices(context.extensionPath);
+    const result = await fetchUsage(token, prices);
+
+    const cache: UsageCache = { ...result, fetchedAt: new Date().toISOString() };
+    const cachePath = getUsageCachePath(context);
+    fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2));
+
     const { dailyBudget } = getDailyBudget(context);
-    updateStatusBar(todaySpend, dailyBudget);
-
-    const expensiveModels: string[] = [];
-    if (currentModel.toLowerCase() !== "auto" && currentModel !== "unknown") {
-      expensiveModels.push(currentModel);
-    }
+    updateStatusBar(result.todaySpend, dailyBudget);
 
     const now = Date.now();
     const mayShowWarning = now - lastWarningShownAt >= WARNING_THROTTLE_MS;
 
-    if (untrackedModels.length > 0 && mayShowWarning) {
+    if (result.untrackedModelsToday.length > 0 && mayShowWarning) {
       lastWarningShownAt = now;
       vscode.window.showWarningMessage(
-        `Cursor Pace: No price data for ${untrackedModels.join(", ")} — spend from these models can't be tracked.`
+        `Cursor Pace: No price data for ${result.untrackedModelsToday.join(", ")} — run scripts/infer_prices.py to add them.`
       );
     }
 
-    const pct = dailyBudget > 0 ? Math.round((todaySpend / dailyBudget) * 100) : 0;
+    const pct = dailyBudget > 0 ? Math.round((result.todaySpend / dailyBudget) * 100) : 0;
     if (pct >= 100) {
-      if (expensiveModels.length > 0) {
+      if (result.currentModel.toLowerCase() !== "auto" && result.currentModel !== "unknown" && mayShowWarning) {
+        lastWarningShownAt = now;
         void vscode.window.showErrorMessage(
-          `Cursor Pace: DAILY BUDGET EXCEEDED (${pct}%). Composer is set to ${expensiveModels.join(", ")}. Switch to auto!`,
+          `Cursor Pace: DAILY BUDGET EXCEEDED (${pct}%). Composer is set to ${result.currentModel}. Switch to auto!`,
           { modal: true }
         );
       } else if (mayShowWarning) {
         lastWarningShownAt = now;
         vscode.window.showWarningMessage(
-          `Cursor Pace: You are ${pct}% over your daily budget ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Good job using auto!`
+          `Cursor Pace: You are ${pct}% over your daily budget ($${result.todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}). Good job using auto!`
         );
       }
     } else if (pct >= warnThreshold && mayShowWarning) {
       lastWarningShownAt = now;
       vscode.window.showWarningMessage(
-        `Cursor Pace: ${pct}% of daily budget used ($${todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}).`
+        `Cursor Pace: ${pct}% of daily budget used ($${result.todaySpend.toFixed(2)} / $${dailyBudget.toFixed(2)}).`
       );
     }
 
@@ -288,78 +272,46 @@ const PLANS: Record<string, PlanInfo> = {
 };
 
 function getWebviewHtml(
-  calibration: Record<string, unknown>,
+  prices: Prices,
   settings: {
     subscription: string;
     monthlyBudget: number;
     warnThreshold: number;
-    historyDays: number;
-    activeDays: number | null;
     todaySpend: number;
     monthSpend: number;
-    currentModels: { composer: string; cmdK: string };
+    currentModel: string;
+    monthActiveDaysSoFar: number;
   },
   lastSyncedAt: Date | null,
   dailyBudget: number,
   flatDailyBudget: number
 ): string {
-  const activeDaysPerMonth = settings.activeDays !== null
-    ? Math.round(settings.activeDays / settings.historyDays * 30)
-    : 22;
   const dailyPct = dailyBudget > 0 ? Math.round((settings.todaySpend / dailyBudget) * 100) : 0;
   const monthPct = settings.monthlyBudget > 0 ? Math.round((settings.monthSpend / settings.monthlyBudget) * 100) : 0;
   const budgetAdjusted = Math.abs(dailyBudget - flatDailyBudget) > 0.01;
 
-  type ModelStats = {
-    requests: number;
-    total_tokens: number;
-    on_demand_cost: number;
-    on_demand_tokens: number;
-    included_tokens: number;
-    cost_per_token: number | null;
-    total_estimated_cost: number | null;
-  };
+  const priceEntries = Object.entries(prices)
+    .sort((a, b) => b[1].cost_per_token - a[1].cost_per_token);
 
-  const modelEntries = Object.entries(calibration as Record<string, ModelStats>)
-    .filter(([key]) => key !== "_meta");
+  const hasPrices = priceEntries.length > 0;
 
-  const models = modelEntries
-    .filter(([, s]) => s.cost_per_token !== null)
-    .sort((a, b) => (b[1].total_estimated_cost ?? 0) - (a[1].total_estimated_cost ?? 0));
-
-  const noDataModels = modelEntries
-    .filter(([, s]) => s.cost_per_token === null);
-
-  const hasData = models.length > 0;
-
-  const modelRows = models
-    .map(([name, s]) => {
-      const cpt = s.cost_per_token!;
-      const cptPer1M = (cpt * 1_000_000).toFixed(4);
-      const estCost = s.total_estimated_cost?.toFixed(2) ?? "—";
-      const avgTokensPerReq = s.total_tokens / s.requests;
-      const reqsPerDay = Math.floor(dailyBudget / (cpt * avgTokensPerReq));
-      return `
-      <tr>
-        <td class="model-name">${name}</td>
-        <td>${s.requests.toLocaleString()}</td>
-        <td>$${cptPer1M}</td>
-        <td>$${estCost}</td>
-        <td>${reqsPerDay > 0 ? `~${reqsPerDay}/day` : "<1/day"}</td>
-      </tr>`;
-    })
-    .join("");
-
-  const noDataRows = noDataModels
-    .map(([name, s]) => `
-      <tr class="muted">
-        <td class="model-name">${name}</td>
-        <td>${s.requests.toLocaleString()}</td>
-        <td>—</td>
-        <td>—</td>
-        <td>—</td>
-      </tr>`)
-    .join("");
+  const modelRows = priceEntries.map(([name, p]) => {
+    const perMillion = (p.cost_per_token * 1_000_000).toFixed(4);
+    const confidence = p.on_demand_tokens >= 1_000_000
+      ? "high"
+      : p.on_demand_tokens >= 100_000
+        ? "medium"
+        : "low";
+    const tokensBasis = p.on_demand_tokens >= 1_000_000
+      ? `${(p.on_demand_tokens / 1_000_000).toFixed(1)}M tokens`
+      : `${(p.on_demand_tokens / 1_000).toFixed(0)}K tokens`;
+    return `
+    <tr>
+      <td class="model-name">${name}</td>
+      <td>$${perMillion}</td>
+      <td class="confidence-${confidence}">${tokensBasis}</td>
+    </tr>`;
+  }).join("");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -389,7 +341,6 @@ function getWebviewHtml(
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: var(--vscode-font-family); font-size: 13px; color: var(--fg); background: var(--bg); padding: 24px; }
   h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
-  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 12px; }
   .section { margin-bottom: 28px; }
   .section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 10px; }
   .pace-card { display: flex; gap: 16px; flex-wrap: wrap; }
@@ -401,7 +352,9 @@ function getWebviewHtml(
   th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 6px 10px; background: var(--table-header); border-bottom: 1px solid var(--border); }
   td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
   td.model-name { font-family: var(--vscode-editor-font-family); font-size: 12px; }
-  tr.muted td { color: var(--muted); }
+  .confidence-high { color: var(--vscode-testing-iconPassed, #4caf50); }
+  .confidence-medium { color: var(--vscode-editorWarning-foreground, #cca700); }
+  .confidence-low { color: var(--muted); }
   .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 480px; }
   .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
   .field input { width: 100%; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--input-border, var(--border)); border-radius: 3px; padding: 5px 8px; font-size: 13px; outline: none; }
@@ -416,8 +369,6 @@ function getWebviewHtml(
   .actions { display: flex; gap: 8px; margin-top: 6px; }
   button { background: var(--btn-bg); color: var(--btn-fg); border: none; border-radius: 3px; padding: 6px 14px; font-size: 12px; cursor: pointer; }
   button:hover { background: var(--btn-hover); }
-  button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
-  button.secondary:hover { background: var(--table-header); }
   .empty { color: var(--muted); padding: 20px 0; }
   .subtitle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; }
   .subtitle-text { color: var(--muted); font-size: 12px; }
@@ -425,13 +376,12 @@ function getWebviewHtml(
   .refresh-btn:hover { color: var(--fg); background: transparent; }
   .refresh-btn.spinning { animation: spin 1s linear infinite; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-  .table-wrap { position: relative; }
   .table-overlay { display: none; position: absolute; inset: 0; background: var(--bg); opacity: 0.6; z-index: 5; }
   .table-overlay.visible { display: block; }
-  .loading-row td { color: var(--muted); text-align: center; padding: 20px; font-style: italic; }
   .info-badge { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font-size: 10px; font-weight: 700; cursor: default; position: relative; margin-left: 5px; vertical-align: middle; line-height: 1; }
   .info-badge:hover .tooltip { display: block; }
   .tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--vscode-editorHoverWidget-background, #252526); border: 1px solid var(--vscode-editorHoverWidget-border, #454545); color: var(--vscode-editorHoverWidget-foreground, #ccc); font-size: 11px; font-weight: 400; padding: 6px 10px; border-radius: 4px; white-space: normal; width: max-content; max-width: 220px; line-height: 1.5; z-index: 10; pointer-events: none; }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -457,8 +407,8 @@ function getWebviewHtml(
     <div class="card">
       <div class="card-label">Daily Budget
         <span class="info-badge">i<span class="tooltip">${budgetAdjusted
-          ? `Adjusted from $${flatDailyBudget.toFixed(2)} based on month-to-date spend. Over/underspending earlier in the month shifts your remaining daily budget.`
-          : `$${settings.monthlyBudget} ÷ ${activeDaysPerMonth} active days`}</span></span>
+          ? `Adjusted from $${flatDailyBudget.toFixed(2)} based on month-to-date spend.`
+          : `$${settings.monthlyBudget} ÷ ${ACTIVE_DAYS_PER_MONTH} active days`}</span></span>
       </div>
       <div class="card-value"${budgetAdjusted ? ` style="color:${dailyBudget < flatDailyBudget ? 'var(--vscode-editorWarning-foreground)' : 'var(--vscode-testing-iconPassed)'}"` : ''}>$${dailyBudget.toFixed(2)} <span class="card-unit">/ day</span></div>
     </div>
@@ -469,14 +419,8 @@ function getWebviewHtml(
       <div class="card-value" style="${monthPct >= 100 ? 'color:var(--vscode-errorForeground)' : ''}">$${settings.monthSpend.toFixed(2)} <span class="card-unit">/ $${settings.monthlyBudget}</span></div>
     </div>
     <div class="card">
-      <div class="card-label">Active Days
-        <span class="info-badge">i<span class="tooltip">Days with requests ≥ (avg − 1 std dev) in your history.&#10;Excludes very low-usage days, keeps crunch days.</span></span>
-      </div>
-      <div class="card-value">${activeDaysPerMonth} <span class="card-unit">/ mo</span></div>
-    </div>
-    <div class="card">
-      <div class="card-label">Composer Model</div>
-      <div class="card-value" style="font-size:14px; font-family:var(--vscode-editor-font-family); ${settings.currentModels.composer.toLowerCase() !== 'auto' ? 'color:var(--vscode-editorWarning-foreground)' : ''}">${settings.currentModels.composer}</div>
+      <div class="card-label">Current Model</div>
+      <div class="card-value" style="font-size:14px; font-family:var(--vscode-editor-font-family); ${settings.currentModel.toLowerCase() !== 'auto' && settings.currentModel !== 'unknown' ? 'color:var(--vscode-editorWarning-foreground)' : ''}">${settings.currentModel}</div>
     </div>
     <div class="card">
       <div class="card-label">Warn At</div>
@@ -486,25 +430,24 @@ function getWebviewHtml(
 </div>
 
 <div class="section">
-  <div class="section-title">Model Cost Data <span style="font-weight:400;text-transform:none">(last ${settings.historyDays === 90 ? "3 months" : "30 days"})</span></div>
-  <div class="table-wrap">
+  <div class="section-title">Model Prices <span style="font-weight:400;text-transform:none">(from prices.json)</span></div>
+  <div style="position:relative">
     <div class="table-overlay" id="tableOverlay"></div>
-    ${hasData ? `
+    ${hasPrices ? `
     <table>
       <thead>
         <tr>
           <th>Model</th>
-          <th>Requests</th>
-          <th>Cost / 1M tokens</th>
-          <th>Est. cost</th>
-          <th>Pace at daily budget</th>
+          <th>$ / 1M tokens</th>
+          <th>Based on
+            <span class="info-badge">i<span class="tooltip">How many on-demand tokens were used to infer this price. More tokens = higher confidence.</span></span>
+          </th>
         </tr>
       </thead>
-      <tbody id="tableBody">
-        ${modelRows}
-        ${noDataRows}
-      </tbody>
-    </table>` : `<p class="empty">No calibration data yet. Click Refresh to fetch usage data.</p>`}
+      <tbody>${modelRows}</tbody>
+    </table>
+    <p class="hint">Run <code>python scripts/infer_prices.py</code> to update prices from your usage data.</p>` 
+    : `<p class="empty">No prices loaded. Run <code>python scripts/infer_prices.py</code> to generate prices.json.</p>`}
   </div>
 </div>
 
@@ -533,13 +476,6 @@ function getWebviewHtml(
       <label>Warn Threshold (%)</label>
       <input type="number" id="warnThreshold" value="${settings.warnThreshold}" min="1" max="100" />
     </div>
-    <div class="field" style="grid-column: 1 / -1">
-      <label>Price History Window</label>
-      <select id="historyDays">
-        <option value="30" ${settings.historyDays !== 90 ? "selected" : ""}>Last 30 days</option>
-        <option value="90" ${settings.historyDays === 90 ? "selected" : ""}>Last 3 months</option>
-      </select>
-    </div>
   </div>
   <div class="actions" style="margin-top:14px">
     <button onclick="saveSettings()">Save Settings</button>
@@ -549,6 +485,7 @@ function getWebviewHtml(
 <script>
   const vscode = acquireVsCodeApi();
   const PLANS = ${JSON.stringify(PLANS)};
+  const ACTIVE_DAYS_PER_MONTH = ${ACTIVE_DAYS_PER_MONTH};
   function onSubscriptionChange(plan) {
     const info = PLANS[plan];
     const input = document.getElementById('monthlyBudget');
@@ -567,7 +504,6 @@ function getWebviewHtml(
       subscription: document.getElementById('subscription').value,
       monthlyBudget: +document.getElementById('monthlyBudget').value,
       warnThreshold: +document.getElementById('warnThreshold').value,
-      historyDays: +document.getElementById('historyDays').value,
     });
   }
   function refresh() {

@@ -1,0 +1,92 @@
+{
+  "claude-4.5-haiku-thinking": {
+    "cost_per_token": 2.408307975299459e-07,
+    "on_demand_cost": 85.158,
+    "on_demand_tokens": 353600955
+  },
+  "claude-4.5-opus-high-thinking": {
+    "cost_per_token": 7.266398698674802e-07,
+    "on_demand_cost": 344.45,
+    "on_demand_tokens": 474031242
+  },
+  "claude-4.5-sonnet-thinking": {
+    "cost_per_token": 6.600621842129705e-07,
+    "on_demand_cost": 580.17,
+    "on_demand_tokens": 878962640
+  },
+  "claude-4.6-opus-high-thinking": {
+    "cost_per_token": 9.838644790164886e-07,
+    "on_demand_cost": 281.05,
+    "on_demand_tokens": 285659261
+  },
+  "claude-4.6-sonnet-medium-thinking": {
+    "cost_per_token": 7.84496614271437e-07,
+    "on_demand_cost": 9.78,
+    "on_demand_tokens": 12466593
+  },
+  "gemini-2.5-pro": {
+    "cost_per_token": 5.055829979132251e-07,
+    "on_demand_cost": 33.366,
+    "on_demand_tokens": 65995099
+  },
+  "gemini-2.5-pro-preview-05-06": {
+    "cost_per_token": 1.14674515500172e-06,
+    "on_demand_cost": 0.33,
+    "on_demand_tokens": 287771
+  },
+  "gemini-3-flash-preview": {
+    "cost_per_token": 1.752024378641701e-07,
+    "on_demand_cost": 3.38,
+    "on_demand_tokens": 19291969
+  },
+  "gemini-3-pro-preview": {
+    "cost_per_token": 5.749345903509064e-07,
+    "on_demand_cost": 165.09,
+    "on_demand_tokens": 287145708
+  },
+  "gpt-4o": {
+    "cost_per_token": 1.5480216466553585e-06,
+    "on_demand_cost": 1.69,
+    "on_demand_tokens": 1091716
+  },
+  "gpt-5": {
+    "cost_per_token": 2.9658933623793395e-07,
+    "on_demand_cost": 29.24,
+    "on_demand_tokens": 98587496
+  },
+  "gpt-5-codex": {
+    "cost_per_token": 3.7394025301835096e-07,
+    "on_demand_cost": 7.366,
+    "on_demand_tokens": 19698334
+  },
+  "gpt-5.1": {
+    "cost_per_token": 2.995429765762485e-07,
+    "on_demand_cost": 19.98,
+    "on_demand_tokens": 66701614
+  },
+  "gpt-5.1-codex": {
+    "cost_per_token": 2.054980445038914e-07,
+    "on_demand_cost": 16.24,
+    "on_demand_tokens": 79027516
+  },
+  "gpt-5.1-codex-max-xhigh": {
+    "cost_per_token": 1.20962864400629e-06,
+    "on_demand_cost": 0.01,
+    "on_demand_tokens": 8267
+  },
+  "gpt-5.2": {
+    "cost_per_token": 9.403658450576295e-07,
+    "on_demand_cost": 0.44,
+    "on_demand_tokens": 467903
+  },
+  "gpt-5.2-xhigh": {
+    "cost_per_token": 1.0191789427605714e-06,
+    "on_demand_cost": 1.22,
+    "on_demand_tokens": 1197042
+  },
+  "o3": {
+    "cost_per_token": 1.0369839963849377e-06,
+    "on_demand_cost": 2.74,
+    "on_demand_tokens": 2642278
+  }
+}
