@@ -14,21 +14,55 @@ export interface UsageResult {
   monthActiveDaysSoFar: number;
 }
 
-async function httpsGet(url: string, cookie: string): Promise<string> {
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      "Cookie": `WorkosCursorSessionToken=${cookie}`,
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    },
-    redirect: "error",
-  });
+import * as https from "https";
 
-  if (!res.ok) {
-    throw new Error(`Auth failed (HTTP ${res.status}). Session token may be expired.`);
+async function httpsGet(url: string, cookie: string): Promise<string> {
+  const headers = {
+    "Cookie": `WorkosCursorSessionToken=${cookie}`,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  };
+
+  // 1. Try globalThis.fetch first (modern, proxy-aware)
+  try {
+    const res = await fetch(url, { method: "GET", headers, redirect: "error" });
+    if (res.ok) return await res.text();
+    if (res.status === 500) {
+      // Fall through to https.get if fetch gets a 500 — maybe the backend prefers it
+    } else {
+      throw new Error(`Fetch failed (HTTP ${res.status}). Session token may be expired.`);
+    }
+  } catch (err: any) {
+    // If it's a "fetch failed" TypeError, fall through to https.get
+    if (err.name !== "TypeError" || err.message !== "fetch failed") {
+      throw err;
+    }
   }
 
-  return res.text();
+  // 2. Fallback to Node's https.get (bypasses proxy/VS Code stack)
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const options = {
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: "GET",
+      headers,
+    };
+
+    const req = https.request(options, (res) => {
+      if (res.statusCode && res.statusCode >= 300) {
+        reject(new Error(`HTTPS fallback failed (HTTP ${res.statusCode}). Session token may be expired.`));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    });
+
+    req.on("error", (err) => {
+      reject(new Error(`Both fetch and https fallback failed. DNS/Network error: ${err.message}`));
+    });
+    req.end();
+  });
 }
 
 function parseCsv(raw: string): Record<string, string>[] {
